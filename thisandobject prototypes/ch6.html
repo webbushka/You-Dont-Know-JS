@@ -1,0 +1,710 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>this &amp; Object Prototypes</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: <em>this</em> &amp; Object Prototypes</h1>
+<h1>Chapter 6: Behavior Delegation</h1>
+<p>In Chapter 5, we addressed the <code>[[Prototype]]</code> mechanism  in detail, and <em>why</em> it's confusing and inappropriate (despite countless attempts for nearly two decades) to describe it as &quot;class&quot; or &quot;inheritance&quot;. We trudged through not only the fairly verbose syntax (<code>.prototype</code> littering the code), but the various gotchas (like surprising <code>.constructor</code> resolution or ugly pseudo-polymorphic syntax). We explored variations of the &quot;mixin&quot; approach, which many people use to attempt to smooth over such rough areas.</p>
+<p>It's a common reaction at this point to wonder why it has to be so complex to do something seemingly so simple. Now that we've pulled back the curtain and seen just how dirty it all gets, it's not a surprise that most JS developers never dive this deep, and instead relegate such mess to a &quot;class&quot; library to handle it for them.</p>
+<p>I hope by now you're not content to just gloss over and leave such details to a &quot;black box&quot; library. Let's now dig into how we <em>could and should be</em> thinking about the object <code>[[Prototype]]</code> mechanism in JS, in a <strong>much simpler and more straightforward way</strong> than the confusion of classes.</p>
+<p>As a brief review of our conclusions from Chapter 5, the <code>[[Prototype]]</code> mechanism is an internal link that exists on one object which references another object.</p>
+<p>This linkage is exercised when a property/method reference is made against the first object, and no such property/method exists. In that case, the <code>[[Prototype]]</code> linkage tells the engine to look for the property/method on the linked-to object. In turn, if that object cannot fulfill the look-up, its <code>[[Prototype]]</code> is followed, and so on. This series of links between objects forms what is called the &quot;prototype chain&quot;.</p>
+<p>In other words, the actual mechanism, the essence of what's important to the functionality we can leverage in JavaScript, is <strong>all about objects being linked to other objects.</strong></p>
+<p>That single observation is fundamental and critical to understanding the motivations and approaches for the rest of this chapter!</p>
+<h2>Towards Delegation-Oriented Design</h2>
+<p>To properly focus our thoughts on how to use <code>[[Prototype]]</code> in the most straightforward way, we must recognize that it represents a fundamentally different design pattern from classes (see Chapter 4).</p>
+<p><strong>Note:</strong> <em>Some</em> principles of class-oriented design are still very valid, so don't toss out everything you know (just most of it!). For example, <em>encapsulation</em> is quite powerful, and is compatible (though not as common) with delegation.</p>
+<p>We need to try to change our thinking from the class/inheritance design pattern to the behavior delegation design pattern. If you have done most or all of your programming in your education/career thinking in classes, this may be uncomfortable or feel unnatural. You may need to try this mental exercise quite a few times to get the hang of this very different way of thinking.</p>
+<p>I'm going to walk you through some theoretical exercises first, then we'll look side-by-side at a more concrete example to give you practical context for your own code.</p>
+<h3>Class Theory</h3>
+<p>Let's say we have several similar tasks (&quot;XYZ&quot;, &quot;ABC&quot;, etc) that we need to model in our software.</p>
+<p>With classes, the way you design the scenario is: define a general parent (base) class like <code>Task</code>, defining shared behavior for all the &quot;alike&quot; tasks. Then, you define child classes <code>XYZ</code> and <code>ABC</code>, both of which inherit from <code>Task</code>, and each of which adds specialized behavior to handle their respective tasks.</p>
+<p><strong>Importantly,</strong> the class design pattern will encourage you that to get the most out of inheritance, you will want to employ method overriding (and polymorphism), where you override the definition of some general <code>Task</code> method in your <code>XYZ</code> task, perhaps even making use of <code>super</code> to call to the base version of that method while adding more behavior to it. <strong>You'll likely find quite a few places</strong> where you can &quot;abstract&quot; out general behavior to the parent class and specialize (override) it in your child classes.</p>
+<p>Here's some loose pseudo-code for that scenario:</p>
+<pre><code class="language-js">class Task {
+    id;
+
+    // constructor `Task()`
+    Task(ID) { id = ID; }
+    outputTask() { output( id ); }
+}
+
+class XYZ inherits Task {
+    label;
+
+    // constructor `XYZ()`
+    XYZ(ID,Label) { super( ID ); label = Label; }
+    outputTask() { super(); output( label ); }
+}
+
+class ABC inherits Task {
+    // ...
+}
+</code></pre>
+<p>Now, you can instantiate one or more <strong>copies</strong> of the <code>XYZ</code> child class, and use those instance(s) to perform task &quot;XYZ&quot;. These instances have <strong>copies both</strong> of the general <code>Task</code> defined behavior as well as the specific <code>XYZ</code> defined behavior. Likewise, instances of the <code>ABC</code> class would have copies of the <code>Task</code> behavior and the specific <code>ABC</code> behavior. After construction, you will generally only interact with these instances (and not the classes), as the instances each have copies of all the behavior you need to do the intended task.</p>
+<h3>Delegation Theory</h3>
+<p>But now let's try to think about the same problem domain, but using <em>behavior delegation</em> instead of <em>classes</em>.</p>
+<p>You will first define an <strong>object</strong> (not a class, nor a <code>function</code> as most JS'rs would lead you to believe) called <code>Task</code>, and it will have concrete behavior on it that includes utility methods that various tasks can use (read: <em>delegate to</em>!). Then, for each task (&quot;XYZ&quot;, &quot;ABC&quot;), you define an <strong>object</strong> to hold that task-specific data/behavior. You <strong>link</strong> your task-specific object(s) to the <code>Task</code> utility object, allowing them to delegate to it when they need to.</p>
+<p>Basically, you think about performing task &quot;XYZ&quot; as needing behaviors from two sibling/peer objects (<code>XYZ</code> and <code>Task</code>) to accomplish it. But rather than needing to compose them together, via class copies, we can keep them in their separate objects, and we can allow <code>XYZ</code> object to <strong>delegate to</strong> <code>Task</code> when needed.</p>
+<p>Here's some simple code to suggest how you accomplish that:</p>
+<pre><code class="language-js">var Task = {
+    setID: function(ID) { this.id = ID; },
+    outputID: function() { console.log( this.id ); }
+};
+
+// make `XYZ` delegate to `Task`
+var XYZ = Object.create( Task );
+
+XYZ.prepareTask = function(ID,Label) {
+    this.setID( ID );
+    this.label = Label;
+};
+
+XYZ.outputTaskDetails = function() {
+    this.outputID();
+    console.log( this.label );
+};
+
+// ABC = Object.create( Task );
+// ABC ... = ...
+</code></pre>
+<p>In this code, <code>Task</code> and <code>XYZ</code> are not classes (or functions), they're <strong>just objects</strong>. <code>XYZ</code> is set up via <code>Object.create(..)</code> to <code>[[Prototype]]</code> delegate to the <code>Task</code> object (see Chapter 5).</p>
+<p>As compared to class-orientation (aka, OO -- object-oriented), I call this style of code <strong>&quot;OLOO&quot;</strong> (objects-linked-to-other-objects). All we <em>really</em> care about is that the <code>XYZ</code> object delegates to the <code>Task</code> object (as does the <code>ABC</code> object).</p>
+<p>In JavaScript, the <code>[[Prototype]]</code> mechanism links <strong>objects</strong> to other <strong>objects</strong>. There are no abstract mechanisms like &quot;classes&quot;, no matter how much you try to convince yourself otherwise. It's like paddling a canoe upstream: you <em>can</em> do it, but you're <em>choosing</em> to go against the natural current, so it's obviously <strong>going to be harder to get where you're going.</strong></p>
+<p>Some other differences to note with <strong>OLOO style code</strong>:</p>
+<ol>
+<li><p>Both <code>id</code> and <code>label</code> data members from the previous class example are data properties directly on <code>XYZ</code> (neither is on <code>Task</code>). In general, with <code>[[Prototype]]</code> delegation involved, <strong>you want state to be on the delegators</strong> (<code>XYZ</code>, <code>ABC</code>), not on the delegate (<code>Task</code>).</p></li>
+<li><p>With the class design pattern, we intentionally named <code>outputTask</code> the same on both parent (<code>Task</code>) and child (<code>XYZ</code>), so that we could take advantage of overriding (polymorphism). In behavior delegation, we do the opposite: <strong>we avoid if at all possible naming things the same</strong> at different levels of the <code>[[Prototype]]</code> chain (called shadowing -- see Chapter 5), because having those name collisions creates awkward/brittle syntax to disambiguate references (see Chapter 4), and we want to avoid that if we can.</p>
+<p>This design pattern calls for less of general method names which are prone to overriding and instead more of descriptive method names, <em>specific</em> to the type of behavior each object is doing. <strong>This can actually create easier to understand/maintain code</strong>, because the names of methods (not only at definition location but strewn throughout other code) are more obvious (self documenting).</p></li>
+<li><p><code>this.setID(ID);</code> inside of a method on the <code>XYZ</code> object first looks on <code>XYZ</code> for <code>setID(..)</code>, but since it doesn't find a method of that name on <code>XYZ</code>, <code>[[Prototype]]</code> <em>delegation</em> means it can follow the link to <code>Task</code> to look for <code>setID(..)</code>, which it of course finds. Moreover, because of implicit call-site <code>this</code> binding rules (see Chapter 2), when <code>setID(..)</code> runs, even though the method was found on <code>Task</code>, the <code>this</code> binding for that function call is <code>XYZ</code> exactly as we'd expect and want. We see the same thing with <code>this.outputID()</code> later in the code listing.</p>
+<p>In other words, the general utility methods that exist on <code>Task</code> are available to us while interacting with <code>XYZ</code>, because <code>XYZ</code> can delegate to <code>Task</code>.</p></li>
+</ol>
+<p><strong>Behavior Delegation</strong> means: let some object (<code>XYZ</code>) provide a delegation (to <code>Task</code>) for property or method references if not found on the object (<code>XYZ</code>).</p>
+<p>This is an <em>extremely powerful</em> design pattern, very distinct from the idea of parent and child classes, inheritance, polymorphism, etc. Rather than organizing the objects in your mind vertically, with Parents flowing down to Children, think of objects side-by-side, as peers, with any direction of delegation links between the objects as necessary.</p>
+<p><strong>Note:</strong> Delegation is more properly used as an internal implementation detail rather than exposed directly in the API interface design. In the above example, we don't necessarily <em>intend</em> with our API design for developers to call <code>XYZ.setID()</code> (though we can, of course!). We sorta <em>hide</em> the delegation as an internal detail of our API, where <code>XYZ.prepareTask(..)</code> delegates to <code>Task.setID(..)</code>. See the &quot;Links As Fallbacks?&quot; discussion in Chapter 5 for more detail.</p>
+<h4>Mutual Delegation (Disallowed)</h4>
+<p>You cannot create a <em>cycle</em> where two or more objects are mutually delegated (bi-directionally) to each other. If you make <code>B</code> linked to <code>A</code>, and then try to link <code>A</code> to <code>B</code>, you will get an error.</p>
+<p>It's a shame (not terribly surprising, but mildly annoying) that this is disallowed. If you made a reference to a property/method which didn't exist in either place, you'd have an infinite recursion on the <code>[[Prototype]]</code> loop. But if all references were strictly present, then <code>B</code> could delegate to <code>A</code>, and vice versa, and it <em>could</em> work. This would mean you could use either object to delegate to the other, for various tasks. There are a few niche use-cases where this might be helpful.</p>
+<p>But it's disallowed because engine implementors have observed that it's more performant to check for (and reject!) the infinite circular reference once at set-time rather than needing to have the performance hit of that guard check every time you look-up a property on an object.</p>
+<h4>Debugged</h4>
+<p>We'll briefly cover a subtle detail that can be confusing to developers. In general, the JS specification does not control how browser developer tools should represent specific values/structures to a developer, so each browser/engine is free to interpret such things as they see fit. As such, browsers/tools <em>don't always agree</em>. Specifically, the behavior we will now examine is currently observed only in Chrome's Developer Tools.</p>
+<p>Consider this traditional &quot;class constructor&quot; style JS code, as it would appear in the <em>console</em> of Chrome Developer Tools:</p>
+<pre><code class="language-js">function Foo() {}
+
+var a1 = new Foo();
+
+a1; // Foo {}
+</code></pre>
+<p>Let's look at the last line of that snippet: the output of evaluating the <code>a1</code> expression, which prints <code>Foo {}</code>. If you try this same code in Firefox, you will likely see <code>Object {}</code>. Why the difference? What do these outputs mean?</p>
+<p>Chrome is essentially saying &quot;{} is an empty object that was constructed by a function with name 'Foo'&quot;. Firefox is saying &quot;{} is an empty object of general construction from Object&quot;. The subtle difference is that Chrome is actively tracking, as an <em>internal property</em>, the name of the actual function that did the construction, whereas other browsers don't track that additional information.</p>
+<p>It would be tempting to attempt to explain this with JavaScript mechanisms:</p>
+<pre><code class="language-js">function Foo() {}
+
+var a1 = new Foo();
+
+a1.constructor; // Foo(){}
+a1.constructor.name; // &quot;Foo&quot;
+</code></pre>
+<p>So, is that how Chrome is outputting &quot;Foo&quot;, by simply examining the object's <code>.constructor.name</code>? Confusingly, the answer is both &quot;yes&quot; and &quot;no&quot;.</p>
+<p>Consider this code:</p>
+<pre><code class="language-js">function Foo() {}
+
+var a1 = new Foo();
+
+Foo.prototype.constructor = function Gotcha(){};
+
+a1.constructor; // Gotcha(){}
+a1.constructor.name; // &quot;Gotcha&quot;
+
+a1; // Foo {}
+</code></pre>
+<p>Even though we change <code>a1.constructor.name</code> to legitimately be something else (&quot;Gotcha&quot;), Chrome's console still uses the &quot;Foo&quot; name.</p>
+<p>So, it would appear the answer to previous question (does it use <code>.constructor.name</code>?) is <strong>no</strong>, it must track it somewhere else, internally.</p>
+<p>But, Not so fast! Let's see how this kind of behavior works with OLOO-style code:</p>
+<pre><code class="language-js">var Foo = {};
+
+var a1 = Object.create( Foo );
+
+a1; // Object {}
+
+Object.defineProperty( Foo, &quot;constructor&quot;, {
+    enumerable: false,
+    value: function Gotcha(){}
+});
+
+a1; // Gotcha {}
+</code></pre>
+<p>Ah-ha! <strong>Gotcha!</strong> Here, Chrome's console <strong>did</strong> find and use the <code>.constructor.name</code>. Actually, while writing this book, this exact behavior was identified as a bug in Chrome, and by the time you're reading this, it may have already been fixed. So you may instead have seen the corrected <code>a1; // Object {}</code>.</p>
+<p>Aside from that bug, the internal tracking (apparently only for debug output purposes) of the &quot;constructor name&quot; that Chrome does (shown in the earlier snippets) is an intentional Chrome-only extension of behavior beyond what the JS specification calls for.</p>
+<p>If you don't use a &quot;constructor&quot; to make your objects, as we've discouraged with OLOO-style code here in this chapter, then you'll get objects that Chrome does <em>not</em> track an internal &quot;constructor name&quot; for, and such objects will correctly only be outputted as &quot;Object {}&quot;, meaning &quot;object generated from Object() construction&quot;.</p>
+<p><strong>Don't think</strong> this represents a drawback of OLOO-style coding. When you code with OLOO and behavior delegation as your design pattern, <em>who</em> &quot;constructed&quot; (that is, <em>which function</em> was called with <code>new</code>?) some object is an irrelevant detail. Chrome's specific internal &quot;constructor name&quot; tracking is really only useful if you're fully embracing &quot;class-style&quot; coding, but is moot if you're instead embracing OLOO delegation.</p>
+<h3>Mental Models Compared</h3>
+<p>Now that you can see a difference between &quot;class&quot; and &quot;delegation&quot; design patterns, at least theoretically, let's see the implications these design patterns have on the mental models we use to reason about our code.</p>
+<p>We'll examine some more theoretical (&quot;Foo&quot;, &quot;Bar&quot;) code, and compare both ways (OO vs. OLOO) of implementing the code. The first snippet uses the classical (&quot;prototypal&quot;) OO style:</p>
+<pre><code class="language-js">function Foo(who) {
+    this.me = who;
+}
+Foo.prototype.identify = function() {
+    return &quot;I am &quot; + this.me;
+};
+
+function Bar(who) {
+    Foo.call( this, who );
+}
+Bar.prototype = Object.create( Foo.prototype );
+
+Bar.prototype.speak = function() {
+    alert( &quot;Hello, &quot; + this.identify() + &quot;.&quot; );
+};
+
+var b1 = new Bar( &quot;b1&quot; );
+var b2 = new Bar( &quot;b2&quot; );
+
+b1.speak();
+b2.speak();
+</code></pre>
+<p>Parent class <code>Foo</code>, inherited by child class <code>Bar</code>, which is then instantiated twice as <code>b1</code> and <code>b2</code>. What we have is <code>b1</code> delegating to <code>Bar.prototype</code> which delegates to <code>Foo.prototype</code>. This should look fairly familiar to you, at this point. Nothing too ground-breaking going on.</p>
+<p>Now, let's implement <strong>the exact same functionality</strong> using <em>OLOO</em> style code:</p>
+<pre><code class="language-js">var Foo = {
+    init: function(who) {
+        this.me = who;
+    },
+    identify: function() {
+        return &quot;I am &quot; + this.me;
+    }
+};
+
+var Bar = Object.create( Foo );
+
+Bar.speak = function() {
+    alert( &quot;Hello, &quot; + this.identify() + &quot;.&quot; );
+};
+
+var b1 = Object.create( Bar );
+b1.init( &quot;b1&quot; );
+var b2 = Object.create( Bar );
+b2.init( &quot;b2&quot; );
+
+b1.speak();
+b2.speak();
+</code></pre>
+<p>We take exactly the same advantage of <code>[[Prototype]]</code> delegation from <code>b1</code> to <code>Bar</code> to <code>Foo</code> as we did in the previous snippet between <code>b1</code>, <code>Bar.prototype</code>, and <code>Foo.prototype</code>. <strong>We still have the same 3 objects linked together</strong>.</p>
+<p>But, importantly, we've greatly simplified <em>all the other stuff</em> going on, because now we just set up <strong>objects</strong> linked to each other, without needing all the cruft and confusion of things that look (but don't behave!) like classes, with constructors and prototypes and <code>new</code> calls.</p>
+<p>Ask yourself: if I can get the same functionality with OLOO style code as I do with &quot;class&quot; style code, but OLOO is simpler and has less things to think about, <strong>isn't OLOO better</strong>?</p>
+<p>Let's examine the mental models involved between these two snippets.</p>
+<p>First, the class-style code snippet implies this mental model of entities and their relationships:</p>
+<p><img src="fig4.png"></p>
+<p>Actually, that's a little unfair/misleading, because it's showing a lot of extra detail that you don't <em>technically</em> need to know at all times (though you <em>do</em> need to understand it!). One take-away is that it's quite a complex series of relationships. But another take-away: if you spend the time to follow those relationship arrows around, <strong>there's an amazing amount of internal consistency</strong> in JS's mechanisms.</p>
+<p>For instance, the ability of a JS function to access <code>call(..)</code>, <code>apply(..)</code>, and <code>bind(..)</code> (see Chapter 2) is because functions themselves are objects, and function-objects also have a <code>[[Prototype]]</code> linkage, to the <code>Function.prototype</code> object, which defines those default methods that any function-object can delegate to. JS can do those things, <em>and you can too!</em>.</p>
+<p>OK, let's now look at a <em>slightly</em> simplified version of that diagram which is a little more &quot;fair&quot; for comparison -- it shows only the <em>relevant</em> entities and relationships.</p>
+<p><img src="fig5.png"></p>
+<p>Still pretty complex, eh? The dotted lines are depicting the implied relationships when you setup the &quot;inheritance&quot; between <code>Foo.prototype</code> and <code>Bar.prototype</code> and haven't yet <em>fixed</em> the <strong>missing</strong> <code>.constructor</code> property reference (see &quot;Constructor Redux&quot; in Chapter 5). Even with those dotted lines removed, the mental model is still an awful lot to juggle every time you work with object linkages.</p>
+<p>Now, let's look at the mental model for OLOO-style code:</p>
+<p><img src="fig6.png"></p>
+<p>As you can see comparing them, it's quite obvious that OLOO-style code has <em>vastly less stuff</em> to worry about, because OLOO-style code embraces the <strong>fact</strong> that the only thing we ever really cared about was the <strong>objects linked to other objects</strong>.</p>
+<p>All the other &quot;class&quot; cruft was a confusing and complex way of getting the same end result. Remove that stuff, and things get much simpler (without losing any capability).</p>
+<h2>Classes vs. Objects</h2>
+<p>We've just seen various theoretical explorations and mental models of &quot;classes&quot; vs. &quot;behavior delegation&quot;. But, let's now look at more concrete code scenarios to show how'd you actually use these ideas.</p>
+<p>We'll first examine a typical scenario in front-end web dev: creating UI widgets (buttons, drop-downs, etc).</p>
+<h3>Widget &quot;Classes&quot;</h3>
+<p>Because you're probably still so used to the OO design pattern, you'll likely immediately think of this problem domain in terms of a parent class (perhaps called <code>Widget</code>) with all the common base widget behavior, and then child derived classes for specific widget types (like <code>Button</code>).</p>
+<p><strong>Note:</strong> We're going to use jQuery here for DOM and CSS manipulation, only because it's a detail we don't really care about for the purposes of our current discussion. None of this code cares which JS framework (jQuery, Dojo, YUI, etc), if any, you might solve such mundane tasks with.</p>
+<p>Let's examine how we'd implement the &quot;class&quot; design in classic-style pure JS without any &quot;class&quot; helper library or syntax:</p>
+<pre><code class="language-js">// Parent class
+function Widget(width,height) {
+    this.width = width || 50;
+    this.height = height || 50;
+    this.$elem = null;
+}
+
+Widget.prototype.render = function($where){
+    if (this.$elem) {
+        this.$elem.css( {
+            width: this.width + &quot;px&quot;,
+            height: this.height + &quot;px&quot;
+        } ).appendTo( $where );
+    }
+};
+
+// Child class
+function Button(width,height,label) {
+    // &quot;super&quot; constructor call
+    Widget.call( this, width, height );
+    this.label = label || &quot;Default&quot;;
+
+    this.$elem = $( &quot;&lt;button&gt;&quot; ).text( this.label );
+}
+
+// make `Button` &quot;inherit&quot; from `Widget`
+Button.prototype = Object.create( Widget.prototype );
+
+// override base &quot;inherited&quot; `render(..)`
+Button.prototype.render = function($where) {
+    // &quot;super&quot; call
+    Widget.prototype.render.call( this, $where );
+    this.$elem.click( this.onClick.bind( this ) );
+};
+
+Button.prototype.onClick = function(evt) {
+    console.log( &quot;Button '&quot; + this.label + &quot;' clicked!&quot; );
+};
+
+$( document ).ready( function(){
+    var $body = $( document.body );
+    var btn1 = new Button( 125, 30, &quot;Hello&quot; );
+    var btn2 = new Button( 150, 40, &quot;World&quot; );
+
+    btn1.render( $body );
+    btn2.render( $body );
+} );
+</code></pre>
+<p>OO design patterns tell us to declare a base <code>render(..)</code> in the parent class, then override it in our child class, but not to replace it per se, rather to augment the base functionality with button-specific behavior.</p>
+<p>Notice the ugliness of <em>explicit pseudo-polymorphism</em> (see Chapter 4) with <code>Widget.call</code> and <code>Widget.prototype.render.call</code> references for faking &quot;super&quot; calls from the child &quot;class&quot; methods back up to the &quot;parent&quot; class base methods. Yuck.</p>
+<h4>ES6 <code>class</code> sugar</h4>
+<p>We cover ES6 <code>class</code> syntax sugar in detail in Appendix A, but let's briefly demonstrate how we'd implement the same code using <code>class</code>:</p>
+<pre><code class="language-js">class Widget {
+    constructor(width,height) {
+        this.width = width || 50;
+        this.height = height || 50;
+        this.$elem = null;
+    }
+    render($where){
+        if (this.$elem) {
+            this.$elem.css( {
+                width: this.width + &quot;px&quot;,
+                height: this.height + &quot;px&quot;
+            } ).appendTo( $where );
+        }
+    }
+}
+
+class Button extends Widget {
+    constructor(width,height,label) {
+        super( width, height );
+        this.label = label || &quot;Default&quot;;
+        this.$elem = $( &quot;&lt;button&gt;&quot; ).text( this.label );
+    }
+    render($where) {
+        super.render( $where );
+        this.$elem.click( this.onClick.bind( this ) );
+    }
+    onClick(evt) {
+        console.log( &quot;Button '&quot; + this.label + &quot;' clicked!&quot; );
+    }
+}
+
+$( document ).ready( function(){
+    var $body = $( document.body );
+    var btn1 = new Button( 125, 30, &quot;Hello&quot; );
+    var btn2 = new Button( 150, 40, &quot;World&quot; );
+
+    btn1.render( $body );
+    btn2.render( $body );
+} );
+</code></pre>
+<p>Undoubtedly, a number of the syntax uglies of the previous classical approach have been smoothed over with ES6's <code>class</code>. The presence of a <code>super(..)</code> in particular seems quite nice (though when you dig into it, it's not all roses!).</p>
+<p>Despite syntactic improvements, <strong>these are not <em>real</em> classes</strong>, as they still operate on top of the <code>[[Prototype]]</code> mechanism. They suffer from all the same mental-model mismatches we explored in Chapters 4, 5 and thus far in this chapter. Appendix A will expound on the ES6 <code>class</code> syntax and its implications in detail. We'll see why solving syntax hiccups doesn't substantially solve our class confusions in JS, though it makes a valiant effort masquerading as a solution!</p>
+<p>Whether you use the classic prototypal syntax or the new ES6 sugar, you've still made a <em>choice</em> to model the problem domain (UI widgets) with &quot;classes&quot;. And as the previous few chapters try to demonstrate, this <em>choice</em> in JavaScript is opting you into extra headaches and mental tax.</p>
+<h3>Delegating Widget Objects</h3>
+<p>Here's our simpler <code>Widget</code> / <code>Button</code> example, using <strong>OLOO style delegation</strong>:</p>
+<pre><code class="language-js">var Widget = {
+    init: function(width,height){
+        this.width = width || 50;
+        this.height = height || 50;
+        this.$elem = null;
+    },
+    insert: function($where){
+        if (this.$elem) {
+            this.$elem.css( {
+                width: this.width + &quot;px&quot;,
+                height: this.height + &quot;px&quot;
+            } ).appendTo( $where );
+        }
+    }
+};
+
+var Button = Object.create( Widget );
+
+Button.setup = function(width,height,label){
+    // delegated call
+    this.init( width, height );
+    this.label = label || &quot;Default&quot;;
+
+    this.$elem = $( &quot;&lt;button&gt;&quot; ).text( this.label );
+};
+Button.build = function($where) {
+    // delegated call
+    this.insert( $where );
+    this.$elem.click( this.onClick.bind( this ) );
+};
+Button.onClick = function(evt) {
+    console.log( &quot;Button '&quot; + this.label + &quot;' clicked!&quot; );
+};
+
+$( document ).ready( function(){
+    var $body = $( document.body );
+
+    var btn1 = Object.create( Button );
+    btn1.setup( 125, 30, &quot;Hello&quot; );
+
+    var btn2 = Object.create( Button );
+    btn2.setup( 150, 40, &quot;World&quot; );
+
+    btn1.build( $body );
+    btn2.build( $body );
+} );
+</code></pre>
+<p>With this OLOO-style approach, we don't think of <code>Widget</code> as a parent and <code>Button</code> as a child. Rather, <code>Widget</code> <strong>is just an object</strong> and is sort of a utility collection that any specific type of widget might want to delegate to, and <code>Button</code> <strong>is also just a stand-alone object</strong> (with a delegation link to <code>Widget</code>, of course!).</p>
+<p>From a design pattern perspective, we <strong>didn't</strong> share the same method name <code>render(..)</code> in both objects, the way classes suggest, but instead we chose different names (<code>insert(..)</code> and <code>build(..)</code>) that were more descriptive of what task each does specifically. The <em>initialization</em> methods are called <code>init(..)</code> and <code>setup(..)</code>, respectively, for the same reasons.</p>
+<p>Not only does this delegation design pattern suggest different and more descriptive names (rather than shared and more generic names), but doing so with OLOO happens to avoid the ugliness of the explicit pseudo-polymorphic calls (<code>Widget.call</code> and <code>Widget.prototype.render.call</code>), as you can see by the simple, relative, delegated calls to <code>this.init(..)</code> and <code>this.insert(..)</code>.</p>
+<p>Syntactically, we also don't have any constructors, <code>.prototype</code> or <code>new</code> present, as they are, in fact, just unnecessary cruft.</p>
+<p>Now, if you're paying close attention, you may notice that what was previously just one call (<code>var btn1 = new Button(..)</code>) is now two calls (<code>var btn1 = Object.create(Button)</code> and <code>btn1.setup(..)</code>). Initially this may seem like a drawback (more code).</p>
+<p>However, even this is something that's <strong>a pro of OLOO style code</strong> as compared to classical prototype style code. How?</p>
+<p>With class constructors, you are &quot;forced&quot; (not really, but strongly suggested) to do both construction and initialization in the same step. However, there are many cases where being able to do these two steps separately (as you do with OLOO!) is more flexible.</p>
+<p>For example, let's say you create all your instances in a pool at the beginning of your program, but you wait to initialize them with specific setup until they are pulled from the pool and used. We showed the two calls happening right next to each other, but of course they can happen at very different times and in very different parts of our code, as needed.</p>
+<p><strong>OLOO</strong> supports <em>better</em> the principle of separation of concerns, where creation and initialization are not necessarily conflated into the same operation.</p>
+<h2>Simpler Design</h2>
+<p>In addition to OLOO providing ostensibly simpler (and more flexible!) code, behavior delegation as a pattern can actually lead to simpler code architecture. Let's examine one last example that illustrates how OLOO simplifies your overall design.</p>
+<p>The scenario we'll examine is two controller objects, one for handling the login form of a web page, and another for actually handling the authentication (communication) with the server.</p>
+<p>We'll need a utility helper for making the Ajax communication to the server. We'll use jQuery (though any framework would do fine), since it handles not only the Ajax for us, but it returns a promise-like answer so that we can listen for the response in our calling code with <code>.then(..)</code>.</p>
+<p><strong>Note:</strong> We don't cover Promises here, but we will cover them in a future title of the <em>&quot;You Don't Know JS&quot;</em> series.</p>
+<p>Following the typical class design pattern, we'll break up the task into base functionality in a class called <code>Controller</code>, and then we'll derive two child classes, <code>LoginController</code> and <code>AuthController</code>, which both inherit from <code>Controller</code> and specialize some of those base behaviors.</p>
+<pre><code class="language-js">// Parent class
+function Controller() {
+    this.errors = [];
+}
+Controller.prototype.showDialog = function(title,msg) {
+    // display title &amp; message to user in dialog
+};
+Controller.prototype.success = function(msg) {
+    this.showDialog( &quot;Success&quot;, msg );
+};
+Controller.prototype.failure = function(err) {
+    this.errors.push( err );
+    this.showDialog( &quot;Error&quot;, err );
+};
+</code></pre>
+<pre><code class="language-js">// Child class
+function LoginController() {
+    Controller.call( this );
+}
+// Link child class to parent
+LoginController.prototype = Object.create( Controller.prototype );
+LoginController.prototype.getUser = function() {
+    return document.getElementById( &quot;login_username&quot; ).value;
+};
+LoginController.prototype.getPassword = function() {
+    return document.getElementById( &quot;login_password&quot; ).value;
+};
+LoginController.prototype.validateEntry = function(user,pw) {
+    user = user || this.getUser();
+    pw = pw || this.getPassword();
+
+    if (!(user &amp;&amp; pw)) {
+        return this.failure( &quot;Please enter a username &amp; password!&quot; );
+    }
+    else if (pw.length &lt; 5) {
+        return this.failure( &quot;Password must be 5+ characters!&quot; );
+    }
+
+    // got here? validated!
+    return true;
+};
+// Override to extend base `failure()`
+LoginController.prototype.failure = function(err) {
+    // &quot;super&quot; call
+    Controller.prototype.failure.call( this, &quot;Login invalid: &quot; + err );
+};
+</code></pre>
+<pre><code class="language-js">// Child class
+function AuthController(login) {
+    Controller.call( this );
+    // in addition to inheritance, we also need composition
+    this.login = login;
+}
+// Link child class to parent
+AuthController.prototype = Object.create( Controller.prototype );
+AuthController.prototype.server = function(url,data) {
+    return $.ajax( {
+        url: url,
+        data: data
+    } );
+};
+AuthController.prototype.checkAuth = function() {
+    var user = this.login.getUser();
+    var pw = this.login.getPassword();
+
+    if (this.login.validateEntry( user, pw )) {
+        this.server( &quot;/check-auth&quot;,{
+            user: user,
+            pw: pw
+        } )
+        .then( this.success.bind( this ) )
+        .fail( this.failure.bind( this ) );
+    }
+};
+// Override to extend base `success()`
+AuthController.prototype.success = function() {
+    // &quot;super&quot; call
+    Controller.prototype.success.call( this, &quot;Authenticated!&quot; );
+};
+// Override to extend base `failure()`
+AuthController.prototype.failure = function(err) {
+    // &quot;super&quot; call
+    Controller.prototype.failure.call( this, &quot;Auth Failed: &quot; + err );
+};
+</code></pre>
+<pre><code class="language-js">var auth = new AuthController(
+    // in addition to inheritance, we also need composition
+    new LoginController()
+);
+auth.checkAuth();
+</code></pre>
+<p>We have base behaviors that all controllers share, which are <code>success(..)</code>, <code>failure(..)</code> and <code>showDialog(..)</code>. Our child classes <code>LoginController</code> and <code>AuthController</code> override <code>failure(..)</code> and <code>success(..)</code> to augment the default base class behavior. Also note that <code>AuthController</code> needs an instance of <code>LoginController</code> to interact with the login form, so that becomes a member data property.</p>
+<p>The other thing to mention is that we chose some <em>composition</em> to sprinkle in on top of the inheritance. <code>AuthController</code> needs to know about <code>LoginController</code>, so we instantiate it (<code>new LoginController()</code>) and keep a class member property called <code>this.login</code> to reference it, so that <code>AuthController</code> can invoke behavior on <code>LoginController</code>.</p>
+<p><strong>Note:</strong> There <em>might</em> have been a slight temptation to make <code>AuthController</code> inherit from <code>LoginController</code>, or vice versa, such that we had <em>virtual composition</em> through the inheritance chain. But this is a strongly clear example of what's wrong with class inheritance as <em>the</em> model for the problem domain, because neither <code>AuthController</code> nor <code>LoginController</code> are specializing base behavior of the other, so inheritance between them makes little sense except if classes are your only design pattern. Instead, we layered in some simple <em>composition</em> and now they can cooperate, while still both benefiting from the inheritance from the parent base <code>Controller</code>.</p>
+<p>If you're familiar with class-oriented (OO) design, this should all look pretty familiar and natural.</p>
+<h3>De-class-ified</h3>
+<p>But, <strong>do we really need to model this problem</strong> with a parent <code>Controller</code> class, two child classes, <strong>and some composition</strong>? Is there a way to take advantage of OLOO-style behavior delegation and have a <em>much</em> simpler design? <strong>Yes!</strong></p>
+<pre><code class="language-js">var LoginController = {
+    errors: [],
+    getUser: function() {
+        return document.getElementById( &quot;login_username&quot; ).value;
+    },
+    getPassword: function() {
+        return document.getElementById( &quot;login_password&quot; ).value;
+    },
+    validateEntry: function(user,pw) {
+        user = user || this.getUser();
+        pw = pw || this.getPassword();
+
+        if (!(user &amp;&amp; pw)) {
+            return this.failure( &quot;Please enter a username &amp; password!&quot; );
+        }
+        else if (pw.length &lt; 5) {
+            return this.failure( &quot;Password must be 5+ characters!&quot; );
+        }
+
+        // got here? validated!
+        return true;
+    },
+    showDialog: function(title,msg) {
+        // display success message to user in dialog
+    },
+    failure: function(err) {
+        this.errors.push( err );
+        this.showDialog( &quot;Error&quot;, &quot;Login invalid: &quot; + err );
+    }
+};
+</code></pre>
+<pre><code class="language-js">// Link `AuthController` to delegate to `LoginController`
+var AuthController = Object.create( LoginController );
+
+AuthController.errors = [];
+AuthController.checkAuth = function() {
+    var user = this.getUser();
+    var pw = this.getPassword();
+
+    if (this.validateEntry( user, pw )) {
+        this.server( &quot;/check-auth&quot;,{
+            user: user,
+            pw: pw
+        } )
+        .then( this.accepted.bind( this ) )
+        .fail( this.rejected.bind( this ) );
+    }
+};
+AuthController.server = function(url,data) {
+    return $.ajax( {
+        url: url,
+        data: data
+    } );
+};
+AuthController.accepted = function() {
+    this.showDialog( &quot;Success&quot;, &quot;Authenticated!&quot; )
+};
+AuthController.rejected = function(err) {
+    this.failure( &quot;Auth Failed: &quot; + err );
+};
+</code></pre>
+<p>Since <code>AuthController</code> is just an object (so is <code>LoginController</code>), we don't need to instantiate (like <code>new AuthController()</code>) to perform our task. All we need to do is:</p>
+<pre><code class="language-js">AuthController.checkAuth();
+</code></pre>
+<p>Of course, with OLOO, if you do need to create one or more additional objects in the delegation chain, that's easy, and still doesn't require anything like class instantiation:</p>
+<pre><code class="language-js">var controller1 = Object.create( AuthController );
+var controller2 = Object.create( AuthController );
+</code></pre>
+<p>With behavior delegation, <code>AuthController</code> and <code>LoginController</code> are <strong>just objects</strong>, <em>horizontal</em> peers of each other, and are not arranged or related as parents and children in class-orientation. We somewhat arbitrarily chose to have <code>AuthController</code> delegate to <code>LoginController</code> -- it would have been just as valid for the delegation to go the reverse direction.</p>
+<p>The main takeaway from this second code listing is that we only have two entities (<code>LoginController</code> and <code>AuthController</code>), <strong>not three</strong> as before.</p>
+<p>We didn't need a base <code>Controller</code> class to &quot;share&quot; behavior between the two, because delegation is a powerful enough mechanism to give us the functionality we need. We also, as noted before, don't need to instantiate our classes to work with them, because there are no classes, <strong>just the objects themselves.</strong> Furthermore, there's no need for <em>composition</em> as delegation gives the two objects the ability to cooperate <em>differentially</em> as needed.</p>
+<p>Lastly, we avoided the polymorphism pitfalls of class-oriented design by not having the names <code>success(..)</code> and <code>failure(..)</code> be the same on both objects, which would have required ugly explicit pseudopolymorphism. Instead, we called them <code>accepted()</code> and <code>rejected(..)</code> on <code>AuthController</code> -- slightly more descriptive names for their specific tasks.</p>
+<p><strong>Bottom line</strong>: we end up with the same capability, but a (significantly) simpler design. That's the power of OLOO-style code and the power of the <em>behavior delegation</em> design pattern.</p>
+<h2>Nicer Syntax</h2>
+<p>One of the nicer things that makes ES6's <code>class</code> so deceptively attractive (see Appendix A on why to avoid it!) is the short-hand syntax for declaring class methods:</p>
+<pre><code class="language-js">class Foo {
+    methodName() { /* .. */ }
+}
+</code></pre>
+<p>We get to drop the word <code>function</code> from the declaration, which makes JS developers everywhere cheer!</p>
+<p>And you may have noticed and been frustrated that the suggested OLOO syntax above has lots of <code>function</code> appearances, which seems like a bit of a detractor to the goal of OLOO simplification. <strong>But it doesn't have to be that way!</strong></p>
+<p>As of ES6, we can use <em>concise method declarations</em> in any object literal, so an object in OLOO style can be declared this way (same short-hand sugar as with <code>class</code> body syntax):</p>
+<pre><code class="language-js">var LoginController = {
+    errors: [],
+    getUser() { // Look ma, no `function`!
+        // ...
+    },
+    getPassword() {
+        // ...
+    }
+    // ...
+};
+</code></pre>
+<p>About the only difference is that object literals will still require <code>,</code> comma separators between elements whereas <code>class</code> syntax doesn't. Pretty minor concession in the whole scheme of things.</p>
+<p>Moreover, as of ES6, the clunkier syntax you use (like for the <code>AuthController</code> definition), where you're assigning properties individually and not using an object literal, can be re-written using an object literal (so that you can use concise methods), and you can just modify that object's <code>[[Prototype]]</code> with <code>Object.setPrototypeOf(..)</code>, like this:</p>
+<pre><code class="language-js">// use nicer object literal syntax w/ concise methods!
+var AuthController = {
+    errors: [],
+    checkAuth() {
+        // ...
+    },
+    server(url,data) {
+        // ...
+    }
+    // ...
+};
+
+// NOW, link `AuthController` to delegate to `LoginController`
+Object.setPrototypeOf( AuthController, LoginController );
+</code></pre>
+<p>OLOO-style as of ES6, with concise methods, <strong>is a lot friendlier</strong> than it was before (and even then, it was much simpler and nicer than classical prototype-style code). <strong>You don't have to opt for class</strong> (complexity) to get nice clean object syntax!</p>
+<h3>Unlexical</h3>
+<p>There <em>is</em> one drawback to concise methods that's subtle but important to note. Consider this code:</p>
+<pre><code class="language-js">var Foo = {
+    bar() { /*..*/ },
+    baz: function baz() { /*..*/ }
+};
+</code></pre>
+<p>Here's the syntactic de-sugaring that expresses how that code will operate:</p>
+<pre><code class="language-js">var Foo = {
+    bar: function() { /*..*/ },
+    baz: function baz() { /*..*/ }
+};
+</code></pre>
+<p>See the difference? The <code>bar()</code> short-hand became an <em>anonymous function expression</em> (<code>function()..</code>) attached to the <code>bar</code> property, because the function object itself has no name identifier. Compare that to the manually specified <em>named function expression</em> (<code>function baz()..</code>) which has a lexical name identifier <code>baz</code> in addition to being attached to a <code>.baz</code> property.</p>
+<p>So what? In the <em>&quot;Scope &amp; Closures&quot;</em> title of this <em>&quot;You Don't Know JS&quot;</em> book series, we cover the three main downsides of <em>anonymous function expressions</em> in detail. We'll just briefly repeat them so we can compare to the concise method short-hand.</p>
+<p>Lack of a <code>name</code> identifier on an anonymous function:</p>
+<ol>
+<li>makes debugging stack traces harder</li>
+<li>makes self-referencing (recursion, event (un)binding, etc) harder</li>
+<li>makes code (a little bit) harder to understand</li>
+</ol>
+<p>Items 1 and 3 don't apply to concise methods.</p>
+<p>Even though the de-sugaring uses an <em>anonymous function expression</em> which normally would have no <code>name</code> in stack traces, concise methods are specified to set the internal <code>name</code> property of the function object accordingly, so stack traces should be able to use it (though that's implementation dependent so not guaranteed).</p>
+<p>Item 2 is, unfortunately, <strong>still a drawback to concise methods</strong>. They will not have a lexical identifier to use as a self-reference. Consider:</p>
+<pre><code class="language-js">var Foo = {
+    bar: function(x) {
+        if (x &lt; 10) {
+            return Foo.bar( x * 2 );
+        }
+        return x;
+    },
+    baz: function baz(x) {
+        if (x &lt; 10) {
+            return baz( x * 2 );
+        }
+        return x;
+    }
+};
+</code></pre>
+<p>The manual <code>Foo.bar(x*2)</code> reference above kind of suffices in this example, but there are many cases where a function wouldn't necessarily be able to do that, such as cases where the function is being shared in delegation across different objects, using <code>this</code> binding, etc. You would want to use a real self-reference, and the function object's <code>name</code> identifier is the best way to accomplish that.</p>
+<p>Just be aware of this caveat for concise methods, and if you run into such issues with lack of self-reference, make sure to forgo the concise method syntax <strong>just for that declaration</strong> in favor of the manual <em>named function expression</em> declaration form: <code>baz: function baz(){..}</code>.</p>
+<h2>Introspection</h2>
+<p>If you've spent much time with class oriented programming (either in JS or other languages), you're probably familiar with <em>type introspection</em>: inspecting an instance to find out what <em>kind</em> of object it is. The primary goal of <em>type introspection</em> with class instances is to reason about the structure/capabilities of the object based on <em>how it was created</em>.</p>
+<p>Consider this code which uses <code>instanceof</code> (see Chapter 5) for introspecting on an object <code>a1</code> to infer its capability:</p>
+<pre><code class="language-js">function Foo() {
+    // ...
+}
+Foo.prototype.something = function(){
+    // ...
+}
+
+var a1 = new Foo();
+
+// later
+
+if (a1 instanceof Foo) {
+    a1.something();
+}
+</code></pre>
+<p>Because <code>Foo.prototype</code> (not <code>Foo</code>!) is in the <code>[[Prototype]]</code> chain (see Chapter 5) of <code>a1</code>, the <code>instanceof</code> operator (confusingly) pretends to tell us that <code>a1</code> is an instance of the <code>Foo</code> &quot;class&quot;. With this knowledge, we then assume that <code>a1</code> has the capabilities described by the <code>Foo</code> &quot;class&quot;.</p>
+<p>Of course, there is no <code>Foo</code> class, only a plain old normal function <code>Foo</code>, which happens to have a reference to an arbitrary object (<code>Foo.prototype</code>) that <code>a1</code> happens to be delegation-linked to. By its syntax, <code>instanceof</code> pretends to be inspecting the relationship between <code>a1</code> and <code>Foo</code>, but it's actually telling us whether <code>a1</code> and (the arbitrary object referenced by) <code>Foo.prototype</code> are related.</p>
+<p>The semantic confusion (and indirection) of <code>instanceof</code> syntax  means that to use <code>instanceof</code>-based introspection to ask if object <code>a1</code> is related to the capabilities object in question, you <em>have to</em> have a function that holds a reference to that object -- you can't just directly ask if the two objects are related.</p>
+<p>Recall the abstract <code>Foo</code> / <code>Bar</code> / <code>b1</code> example from earlier in this chapter, which we'll abbreviate here:</p>
+<pre><code class="language-js">function Foo() { /* .. */ }
+Foo.prototype...
+
+function Bar() { /* .. */ }
+Bar.prototype = Object.create( Foo.prototype );
+
+var b1 = new Bar( &quot;b1&quot; );
+</code></pre>
+<p>For <em>type introspection</em> purposes on the entities in that example, using <code>instanceof</code> and <code>.prototype</code> semantics, here are the various checks you might need to perform:</p>
+<pre><code class="language-js">// relating `Foo` and `Bar` to each other
+Bar.prototype instanceof Foo; // true
+Object.getPrototypeOf( Bar.prototype ) === Foo.prototype; // true
+Foo.prototype.isPrototypeOf( Bar.prototype ); // true
+
+// relating `b1` to both `Foo` and `Bar`
+b1 instanceof Foo; // true
+b1 instanceof Bar; // true
+Object.getPrototypeOf( b1 ) === Bar.prototype; // true
+Foo.prototype.isPrototypeOf( b1 ); // true
+Bar.prototype.isPrototypeOf( b1 ); // true
+</code></pre>
+<p>It's fair to say that some of that kinda sucks. For instance, intuitively (with classes) you might want to be able to say something like <code>Bar instanceof Foo</code> (because it's easy to mix up what &quot;instance&quot; means to think it includes &quot;inheritance&quot;), but that's not a sensible comparison in JS. You have to do <code>Bar.prototype instanceof Foo</code> instead.</p>
+<p>Another common, but perhaps less robust, pattern for <em>type introspection</em>, which many devs seem to prefer over <code>instanceof</code>, is called &quot;duck typing&quot;. This term comes from the adage, &quot;if it looks like a duck, and it quacks like a duck, it must be a duck&quot;.</p>
+<p>Example:</p>
+<pre><code class="language-js">if (a1.something) {
+    a1.something();
+}
+</code></pre>
+<p>Rather than inspecting for a relationship between <code>a1</code> and an object that holds the delegatable <code>something()</code> function, we assume that the test for <code>a1.something</code> passing means <code>a1</code> has the capability to call <code>.something()</code> (regardless of if it found the method directly on <code>a1</code> or delegated to some other object). In and of itself, that assumption isn't so risky.</p>
+<p>But &quot;duck typing&quot; is often extended to make <strong>other assumptions about the object's capabilities</strong> besides what's being tested, which of course introduces more risk (aka, brittle design) into the test.</p>
+<p>One notable example of &quot;duck typing&quot; comes with ES6 Promises (which as an earlier note explained are not being covered in this book).</p>
+<p>For various reasons, there's a need to determine if any arbitrary object reference <em>is a Promise</em>, but the way that test is done is to check if the object happens to have a <code>then()</code> function present on it. In other words, <strong>if any object</strong> happens to have a <code>then()</code> method, ES6 Promises will assume unconditionally that the object <strong>is a &quot;thenable&quot;</strong> and therefore will expect it to behave conformantly to all standard behaviors of Promises.</p>
+<p>If you have any non-Promise object that happens for whatever reason to have a <code>then()</code> method on it, you are strongly advised to keep it far away from the ES6 Promise mechanism to avoid broken assumptions.</p>
+<p>That example clearly illustrates the perils of &quot;duck typing&quot;. You should only use such approaches sparingly and in controlled conditions.</p>
+<p>Turning our attention once again back to OLOO-style code as presented here in this chapter, <em>type introspection</em> turns out to be much cleaner. Let's recall (and abbreviate) the <code>Foo</code> / <code>Bar</code> / <code>b1</code> OLOO example from earlier in the chapter:</p>
+<pre><code class="language-js">var Foo = { /* .. */ };
+
+var Bar = Object.create( Foo );
+Bar...
+
+var b1 = Object.create( Bar );
+</code></pre>
+<p>Using this OLOO approach, where all we have are plain objects that are related via <code>[[Prototype]]</code> delegation, here's the quite simplified <em>type introspection</em> we might use:</p>
+<pre><code class="language-js">// relating `Foo` and `Bar` to each other
+Foo.isPrototypeOf( Bar ); // true
+Object.getPrototypeOf( Bar ) === Foo; // true
+
+// relating `b1` to both `Foo` and `Bar`
+Foo.isPrototypeOf( b1 ); // true
+Bar.isPrototypeOf( b1 ); // true
+Object.getPrototypeOf( b1 ) === Bar; // true
+</code></pre>
+<p>We're not using <code>instanceof</code> anymore, because it's confusingly pretending to have something to do with classes. Now, we just ask the (informally stated) question, &quot;are you <em>a</em> prototype of me?&quot; There's no more indirection necessary with stuff like <code>Foo.prototype</code> or the painfully verbose <code>Foo.prototype.isPrototypeOf(..)</code>.</p>
+<p>I think it's fair to say these checks are significantly less complicated/confusing than the previous set of introspection checks. <strong>Yet again, we see that OLOO is simpler than (but with all the same power of) class-style coding in JavaScript.</strong></p>
+<h2>Review (TL;DR)</h2>
+<p>Classes and inheritance are a design pattern you can <em>choose</em>, or <em>not choose</em>, in your software architecture. Most developers take for granted that classes are the only (proper) way to organize code, but here we've seen there's another less-commonly talked about pattern that's actually quite powerful: <strong>behavior delegation</strong>.</p>
+<p>Behavior delegation suggests objects as peers of each other, which delegate amongst themselves, rather than parent and child class relationships. JavaScript's <code>[[Prototype]]</code> mechanism is, by its very designed nature, a behavior delegation mechanism. That means we can either choose to struggle to implement class mechanics on top of JS (see Chapters 4 and 5), or we can just embrace the natural state of <code>[[Prototype]]</code> as a delegation mechanism.</p>
+<p>When you design code with objects only, not only does it simplify the syntax you use, but it can actually lead to simpler code architecture design.</p>
+<p><strong>OLOO</strong> (objects-linked-to-other-objects) is a code style which creates and relates objects directly without the abstraction of classes. OLOO quite naturally implements <code>[[Prototype]]</code>-based behavior delegation.</p>
+</section>
+   </body>
+ </html>

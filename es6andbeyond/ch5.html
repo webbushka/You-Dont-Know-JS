@@ -1,0 +1,417 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>ES6 & Beyond</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: ES6 &amp; Beyond</h1>
+<h1>Chapter 5: Collections</h1>
+<p>Structured collection and access to data is a critical component of just about any JS program. From the beginning of the language up to this point, the array and the object have been our primary mechanism for creating data structures. Of course, many higher-level data structures have been built on top of these, as user-land libraries.</p>
+<p>As of ES6, some of the most useful (and performance-optimizing!) data structure abstractions have been added as native components of the language.</p>
+<p>We'll start this chapter first by looking at <em>TypedArrays</em>, technically contemporary to ES5 efforts several years ago, but only standardized as companions to WebGL and not JavaScript itself. As of ES6, these have been adopted directly by the language specification, which gives them first-class status.</p>
+<p>Maps are like objects (key/value pairs), but instead of just a string for the key, you can use any value -- even another object or map! Sets are similar to arrays (lists of values), but the values are unique; if you add a duplicate, it's ignored. There are also weak (in relation to memory/garbage collection) counterparts: WeakMap and WeakSet.</p>
+<h2>TypedArrays</h2>
+<p>As we cover in the <em>Types &amp; Grammar</em> title of this series, JS does have a set of built-in types, like <code>number</code> and <code>string</code>. It'd be tempting to look at a feature named &quot;typed array&quot; and assume it means an array of a specific type of values, like an array of only strings.</p>
+<p>However, typed arrays are really more about providing structured access to binary data using array-like semantics (indexed access, etc.). The &quot;type&quot; in the name refers to a &quot;view&quot; layered on type of the bucket of bits, which is essentially a mapping of whether the bits should be viewed as an array of 8-bit signed integers, 16-bit signed integers, and so on.</p>
+<p>How do you construct such a bit-bucket? It's called a &quot;buffer,&quot; and you construct it most directly with the <code>ArrayBuffer(..)</code> constructor:</p>
+<pre><code class="language-js">var buf = new ArrayBuffer( 32 );
+buf.byteLength;                         // 32
+</code></pre>
+<p><code>buf</code> is now a binary buffer that is 32-bytes long (256-bits), that's pre-initialized to all <code>0</code>s. A buffer by itself doesn't really allow you any interaction exception for checking its <code>byteLength</code> property.</p>
+<p><strong>Tip:</strong> Several web platform features use or return array buffers, such as <code>FileReader#readAsArrayBuffer(..)</code>, <code>XMLHttpRequest#send(..)</code>, and <code>ImageData</code> (canvas data).</p>
+<p>But on top of this array buffer, you can then layer a &quot;view,&quot; which comes in the form of a typed array. Consider:</p>
+<pre><code class="language-js">var arr = new Uint16Array( buf );
+arr.length;                         // 16
+</code></pre>
+<p><code>arr</code> is a typed array of 16-bit unsigned integers mapped over the 256-bit <code>buf</code> buffer, meaning you get 16 elements.</p>
+<h3>Endianness</h3>
+<p>It's very important to understand that the <code>arr</code> is mapped using the endian-setting (big-endian or little-endian) of the platform the JS is running on. This can be an issue if the binary data is created with one endianness but interpreted on a platform with the opposite endianness.</p>
+<p>Endian means if the low-order byte (collection of 8-bits) of a multi-byte number -- such as the 16-bit unsigned ints we created in the earlier snippet -- is on the right or the left of the number's bytes.</p>
+<p>For example, let's imagine the base-10 number <code>3085</code>, which takes 16-bits to represent. If you have just one 16-bit number container, it'd be represented in binary as <code>0000110000001101</code> (hexadecimal <code>0c0d</code>) regardless of endianness.</p>
+<p>But if <code>3085</code> was represented with two 8-bit numbers, the endianness would significantly affect its storage in memory:</p>
+<ul>
+<li><code>0000110000001101</code> / <code>0c0d</code> (big endian)</li>
+<li><code>0000110100001100</code> / <code>0d0c</code> (little endian)</li>
+</ul>
+<p>If you received the bits of <code>3085</code> as <code>0000110100001100</code> from a little-endian system, but you layered a view on top of it in a big-endian system, you'd instead see value <code>3340</code> (base-10) and <code>0d0c</code> (base-16).</p>
+<p>Little endian is the most common representation on the web these days, but there are definitely browsers where that's not true. It's important that you understand the endianness of both the producer and consumer of a chunk of binary data.</p>
+<p>From MDN, here's a quick way to test the endianness of your JavaScript:</p>
+<pre><code class="language-js">var littleEndian = (function() {
+    var buffer = new ArrayBuffer( 2 );
+    new DataView( buffer ).setInt16( 0, 256, true );
+    return new Int16Array( buffer )[0] === 256;
+})();
+</code></pre>
+<p><code>littleEndian</code> will be <code>true</code> or <code>false</code>; for most browsers, it should return <code>true</code>. This test uses <code>DataView(..)</code>, which allows more low-level, fine-grained control over accessing (setting/getting) the bits from the view you layer over the buffer. The third parameter of the <code>setInt16(..)</code> method in the previous snippet is for telling the <code>DataView</code> what endianness you're wanting it to use for that operation.</p>
+<p><strong>Warning:</strong> Do not confuse endianness of underlying binary storage in array buffers with how a given number is represented when exposed in a JS program. For example, <code>(3085).toString(2)</code> returns <code>&quot;110000001101&quot;</code>, which with an assumed leading four <code>&quot;0&quot;</code>s appears to be the big-endian representation. In fact, this representation is based on a single 16-bit view, not a view of two 8-bit bytes. The <code>DataView</code> test above is the best way to determine endianness for your JS environment.</p>
+<h3>Multiple Views</h3>
+<p>A single buffer can have multiple views attached to it, such as:</p>
+<pre><code class="language-js">var buf = new ArrayBuffer( 2 );
+
+var view8 = new Uint8Array( buf );
+var view16 = new Uint16Array( buf );
+
+view16[0] = 3085;
+view8[0];                       // 13
+view8[1];                       // 12
+
+view8[0].toString( 16 );        // &quot;d&quot;
+view8[1].toString( 16 );        // &quot;c&quot;
+
+// swap (as if endian!)
+var tmp = view8[0];
+view8[0] = view8[1];
+view8[1] = tmp;
+
+view16[0];                      // 3340
+</code></pre>
+<p>The typed array constructors have multiple signature variations. We've shown so far only passing them an existing buffer. However, that form also takes two extra parameters: <code>byteOffset</code> and <code>length</code>. In other words, you can start the typed array view at a location other than <code>0</code> and you can make it span less than the full length of the buffer.</p>
+<p>If the buffer of binary data includes data in non-uniform size/location, this technique can be quite useful.</p>
+<p>For example, consider a binary buffer that has a 2-byte number (aka &quot;word&quot;) at the beginning, followed by two 1-byte numbers, followed by a 32-bit floating point number. Here's how you can access that data with multiple views on the same buffer, offsets, and lengths:</p>
+<pre><code class="language-js">var first = new Uint16Array( buf, 0, 2 )[0],
+    second = new Uint8Array( buf, 2, 1 )[0],
+    third = new Uint8Array( buf, 3, 1 )[0],
+    fourth = new Float32Array( buf, 4, 4 )[0];
+</code></pre>
+<h3>TypedArray Constructors</h3>
+<p>In addition to the <code>(buffer,[offset, [length]])</code> form examined in the previous section, typed array constructors also support these forms:</p>
+<ul>
+<li>[constructor]<code>(length)</code>: Creates a new view over a new buffer of <code>length</code> bytes</li>
+<li>[constructor]<code>(typedArr)</code>: Creates a new view and buffer, and copies the contents from the <code>typedArr</code> view</li>
+<li>[constructor]<code>(obj)</code>: Creates a new view and buffer, and iterates over the array-like or object <code>obj</code> to copy its contents</li>
+</ul>
+<p>The following typed array constructors are available as of ES6:</p>
+<ul>
+<li><code>Int8Array</code> (8-bit signed integers), <code>Uint8Array</code> (8-bit unsigned integers)
+<ul>
+<li><code>Uint8ClampedArray</code> (8-bit unsigned integers, each value clamped on setting to the <code>0</code>-<code>255</code> range)</li>
+</ul></li>
+<li><code>Int16Array</code> (16-bit signed integers), <code>Uint16Array</code> (16-bit unsigned integers)</li>
+<li><code>Int32Array</code> (32-bit signed integers), <code>Uint32Array</code> (32-bit unsigned integers)</li>
+<li><code>Float32Array</code> (32-bit floating point, IEEE-754)</li>
+<li><code>Float64Array</code> (64-bit floating point, IEEE-754)</li>
+</ul>
+<p>Instances of typed array constructors are almost the same as regular native arrays. Some differences include having a fixed length and the values all being of the same &quot;type.&quot;</p>
+<p>However, they share most of the same <code>prototype</code> methods. As such, you likely will be able to use them as regular arrays without needing to convert.</p>
+<p>For example:</p>
+<pre><code class="language-js">var a = new Int32Array( 3 );
+a[0] = 10;
+a[1] = 20;
+a[2] = 30;
+
+a.map( function(v){
+    console.log( v );
+} );
+// 10 20 30
+
+a.join( &quot;-&quot; );
+// &quot;10-20-30&quot;
+</code></pre>
+<p><strong>Warning:</strong> You can't use certain <code>Array.prototype</code> methods with TypedArrays that don't make sense, such as the mutators (<code>splice(..)</code>, <code>push(..)</code>, etc.) and <code>concat(..)</code>.</p>
+<p>Be aware that the elements in TypedArrays really are constrained to the declared bit sizes. If you have a <code>Uint8Array</code> and try to assign something larger than an 8-bit value into one of its elements, the value wraps around so as to stay within the bit length.</p>
+<p>This could cause problems if you were trying to, for instance, square all the values in a TypedArray. Consider:</p>
+<pre><code class="language-js">var a = new Uint8Array( 3 );
+a[0] = 10;
+a[1] = 20;
+a[2] = 30;
+
+var b = a.map( function(v){
+    return v * v;
+} );
+
+b;              // [100, 144, 132]
+</code></pre>
+<p>The <code>20</code> and <code>30</code> values, when squared, resulted in bit overflow. To get around such a limitation, you can use the <code>TypedArray#from(..)</code> function:</p>
+<pre><code class="language-js">var a = new Uint8Array( 3 );
+a[0] = 10;
+a[1] = 20;
+a[2] = 30;
+
+var b = Uint16Array.from( a, function(v){
+    return v * v;
+} );
+
+b;              // [100, 400, 900]
+</code></pre>
+<p>See the &quot;<code>Array.from(..)</code> Static Function&quot; section in Chapter 6 for more information about the <code>Array.from(..)</code> that is shared with TypedArrays. Specifically, the &quot;Mapping&quot; section explains the mapping function accepted as its second argument.</p>
+<p>One interesting behavior to consider is that TypedArrays have a <code>sort(..)</code> method much like regular arrays, but this one defaults to numeric sort comparisons instead of coercing values to strings for lexicographic comparison. For example:</p>
+<pre><code class="language-js">var a = [ 10, 1, 2, ];
+a.sort();                               // [1,10,2]
+
+var b = new Uint8Array( [ 10, 1, 2 ] );
+b.sort();                               // [1,2,10]
+</code></pre>
+<p>The <code>TypedArray#sort(..)</code> takes an optional compare function argument just like <code>Array#sort(..)</code>, which works in exactly the same way.</p>
+<h2>Maps</h2>
+<p>If you have a lot of JS experience, you know that objects are the primary mechanism for creating unordered key/value-pair data structures, otherwise known as maps. However, the major drawback with objects-as-maps is the inability to use a non-string value as the key.</p>
+<p>For example, consider:</p>
+<pre><code class="language-js">var m = {};
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m[x] = &quot;foo&quot;;
+m[y] = &quot;bar&quot;;
+
+m[x];                           // &quot;bar&quot;
+m[y];                           // &quot;bar&quot;
+</code></pre>
+<p>What's going on here? The two objects <code>x</code> and <code>y</code> both stringify to <code>&quot;[object Object]&quot;</code>, so only that one key is being set in <code>m</code>.</p>
+<p>Some have implemented fake maps by maintaining a parallel array of non-string keys alongside an array of the values, such as:</p>
+<pre><code class="language-js">var keys = [], vals = [];
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+keys.push( x );
+vals.push( &quot;foo&quot; );
+
+keys.push( y );
+vals.push( &quot;bar&quot; );
+
+keys[0] === x;                  // true
+vals[0];                        // &quot;foo&quot;
+
+keys[1] === y;                  // true
+vals[1];                        // &quot;bar&quot;
+</code></pre>
+<p>Of course, you wouldn't want to manage those parallel arrays yourself, so you could define a data structure with methods that automatically do the management under the covers. Besides having to do that work yourself, the main drawback is that access is no longer O(1) time-complexity, but instead is O(n).</p>
+<p>But as of ES6, there's no longer any need to do this! Just use <code>Map(..)</code>:</p>
+<pre><code class="language-js">var m = new Map();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m.set( x, &quot;foo&quot; );
+m.set( y, &quot;bar&quot; );
+
+m.get( x );                     // &quot;foo&quot;
+m.get( y );                     // &quot;bar&quot;
+</code></pre>
+<p>The only drawback is that you can't use the <code>[ ]</code> bracket access syntax for setting and retrieving values. But <code>get(..)</code> and <code>set(..)</code> work perfectly suitably instead.</p>
+<p>To delete an element from a map, don't use the <code>delete</code> operator, but instead use the <code>delete(..)</code> method:</p>
+<pre><code class="language-js">m.set( x, &quot;foo&quot; );
+m.set( y, &quot;bar&quot; );
+
+m.delete( y );
+</code></pre>
+<p>You can clear the entire map's contents with <code>clear()</code>. To get the length of a map (i.e., the number of keys), use the <code>size</code> property (not <code>length</code>):</p>
+<pre><code class="language-js">m.set( x, &quot;foo&quot; );
+m.set( y, &quot;bar&quot; );
+m.size;                         // 2
+
+m.clear();
+m.size;                         // 0
+</code></pre>
+<p>The <code>Map(..)</code> constructor can also receive an iterable (see &quot;Iterators&quot; in Chapter 3), which must produce a list of arrays, where the first item in each array is the key and the second item is the value. This format for iteration is identical to that produced by the <code>entries()</code> method, explained in the next section. That makes it easy to make a copy of a map:</p>
+<pre><code class="language-js">var m2 = new Map( m.entries() );
+
+// same as:
+var m2 = new Map( m );
+</code></pre>
+<p>Because a map instance is an iterable, and its default iterator is the same as <code>entries()</code>, the second shorter form is more preferable.</p>
+<p>Of course, you can just manually specify an <em>entries</em> list (array of key/value arrays) in the <code>Map(..)</code> constructor form:</p>
+<pre><code class="language-js">var x = { id: 1 },
+    y = { id: 2 };
+
+var m = new Map( [
+    [ x, &quot;foo&quot; ],
+    [ y, &quot;bar&quot; ]
+] );
+
+m.get( x );                     // &quot;foo&quot;
+m.get( y );                     // &quot;bar&quot;
+</code></pre>
+<h3>Map Values</h3>
+<p>To get the list of values from a map, use <code>values(..)</code>, which returns an iterator. In Chapters 2 and 3, we covered various ways to process an iterator sequentially (like an array), such as the <code>...</code> spread operator and the <code>for..of</code> loop. Also, &quot;Arrays&quot; in Chapter 6 covers the <code>Array.from(..)</code> method in detail. Consider:</p>
+<pre><code class="language-js">var m = new Map();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m.set( x, &quot;foo&quot; );
+m.set( y, &quot;bar&quot; );
+
+var vals = [ ...m.values() ];
+
+vals;                           // [&quot;foo&quot;,&quot;bar&quot;]
+Array.from( m.values() );       // [&quot;foo&quot;,&quot;bar&quot;]
+</code></pre>
+<p>As discussed in the previous section, you can iterate over a map's entries using <code>entries()</code> (or the default map iterator). Consider:</p>
+<pre><code class="language-js">var m = new Map();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m.set( x, &quot;foo&quot; );
+m.set( y, &quot;bar&quot; );
+
+var vals = [ ...m.entries() ];
+
+vals[0][0] === x;               // true
+vals[0][1];                     // &quot;foo&quot;
+
+vals[1][0] === y;               // true
+vals[1][1];                     // &quot;bar&quot;
+</code></pre>
+<h3>Map Keys</h3>
+<p>To get the list of keys, use <code>keys()</code>, which returns an iterator over the keys in the map:</p>
+<pre><code class="language-js">var m = new Map();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m.set( x, &quot;foo&quot; );
+m.set( y, &quot;bar&quot; );
+
+var keys = [ ...m.keys() ];
+
+keys[0] === x;                  // true
+keys[1] === y;                  // true
+</code></pre>
+<p>To determine if a map has a given key, use <code>has(..)</code>:</p>
+<pre><code class="language-js">var m = new Map();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m.set( x, &quot;foo&quot; );
+
+m.has( x );                     // true
+m.has( y );                     // false
+</code></pre>
+<p>Maps essentially let you associate some extra piece of information (the value) with an object (the key) without actually putting that information on the object itself.</p>
+<p>While you can use any kind of value as a key for a map, you typically will use objects, as strings and other primitives are already eligible as keys of normal objects. In other words, you'll probably want to continue to use normal objects for maps unless some or all of the keys need to be objects, in which case map is more appropriate.</p>
+<p><strong>Warning:</strong> If you use an object as a map key and that object is later discarded (all references unset) in attempt to have garbage collection (GC) reclaim its memory, the map itself will still retain its entry. You will need to remove the entry from the map for it to be GC-eligible. In the next section, we'll see WeakMaps as a better option for object keys and GC.</p>
+<h2>WeakMaps</h2>
+<p>WeakMaps are a variation on maps, which has most of the same external behavior but differs underneath in how the memory allocation (specifically its GC) works.</p>
+<p>WeakMaps take (only) objects as keys. Those objects are held <em>weakly</em>, which means if the object itself is GC'd, the entry in the WeakMap is also removed. This isn't observable behavior, though, as the only way an object can be GC'd is if there's no more references to it -- once there are no more references to it, you have no object reference to check if it exists in the WeakMap.</p>
+<p>Otherwise, the API for WeakMap is similar, though more limited:</p>
+<pre><code class="language-js">var m = new WeakMap();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+m.set( x, &quot;foo&quot; );
+
+m.has( x );                     // true
+m.has( y );                     // false
+</code></pre>
+<p>WeakMaps do not have a <code>size</code> property or <code>clear()</code> method, nor do they expose any iterators over their keys, values, or entries. So even if you unset the <code>x</code> reference, which will remove its entry from <code>m</code> upon GC, there is no way to tell. You'll just have to take JavaScript's word for it!</p>
+<p>Just like Maps, WeakMaps let you soft-associate information with an object. But they are particularly useful if the object is not one you completely control, such as a DOM element. If the object you're using as a map key can be deleted and should be GC-eligible when it is, then a WeakMap is a more appropriate option.</p>
+<p>It's important to note that a WeakMap only holds its <em>keys</em> weakly, not its values. Consider:</p>
+<pre><code class="language-js">var m = new WeakMap();
+
+var x = { id: 1 },
+    y = { id: 2 },
+    z = { id: 3 },
+    w = { id: 4 };
+
+m.set( x, y );
+
+x = null;                       // { id: 1 } is GC-eligible
+y = null;                       // { id: 2 } is GC-eligible
+                                // only because { id: 1 } is
+
+m.set( z, w );
+
+w = null;                       // { id: 4 } is not GC-eligible
+</code></pre>
+<p>For this reason, WeakMaps are in my opinion better named &quot;WeakKeyMaps.&quot;</p>
+<h2>Sets</h2>
+<p>A set is a collection of unique values (duplicates are ignored).</p>
+<p>The API for a set is similar to map. The <code>add(..)</code> method takes the place of the <code>set(..)</code> method (somewhat ironically), and there is no <code>get(..)</code> method.</p>
+<p>Consider:</p>
+<pre><code class="language-js">var s = new Set();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+s.add( x );
+s.add( y );
+s.add( x );
+
+s.size;                         // 2
+
+s.delete( y );
+s.size;                         // 1
+
+s.clear();
+s.size;                         // 0
+</code></pre>
+<p>The <code>Set(..)</code> constructor form is similar to <code>Map(..)</code>, in that it can receive an iterable, like another set or simply an array of values. However, unlike how <code>Map(..)</code> expects <em>entries</em> list (array of key/value arrays), <code>Set(..)</code> expects a <em>values</em> list (array of values):</p>
+<pre><code class="language-js">var x = { id: 1 },
+    y = { id: 2 };
+
+var s = new Set( [x,y] );
+</code></pre>
+<p>A set doesn't need a <code>get(..)</code> because you don't retrieve a value from a set, but rather test if it is present or not, using <code>has(..)</code>:</p>
+<pre><code class="language-js">var s = new Set();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+s.add( x );
+
+s.has( x );                     // true
+s.has( y );                     // false
+</code></pre>
+<p><strong>Note:</strong> The comparison algorithm in <code>has(..)</code> is almost identical to <code>Object.is(..)</code> (see Chapter 6), except that <code>-0</code> and <code>0</code> are treated as the same rather than distinct.</p>
+<h3>Set Iterators</h3>
+<p>Sets have the same iterator methods as maps. Their behavior is different for sets, but symmetric with the behavior of map iterators. Consider:</p>
+<pre><code class="language-js">var s = new Set();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+s.add( x ).add( y );
+
+var keys = [ ...s.keys() ],
+    vals = [ ...s.values() ],
+    entries = [ ...s.entries() ];
+
+keys[0] === x;
+keys[1] === y;
+
+vals[0] === x;
+vals[1] === y;
+
+entries[0][0] === x;
+entries[0][1] === x;
+entries[1][0] === y;
+entries[1][1] === y;
+</code></pre>
+<p>The <code>keys()</code> and <code>values()</code> iterators both yield a list of the unique values in the set. The <code>entries()</code> iterator yields a list of entry arrays, where both items of the array are the unique set value. The default iterator for a set is its <code>values()</code> iterator.</p>
+<p>The inherent uniqueness of a set is its most useful trait. For example:</p>
+<pre><code class="language-js">var s = new Set( [1,2,3,4,&quot;1&quot;,2,4,&quot;5&quot;] ),
+    uniques = [ ...s ];
+
+uniques;                        // [1,2,3,4,&quot;1&quot;,&quot;5&quot;]
+</code></pre>
+<p>Set uniqueness does not allow coercion, so <code>1</code> and <code>&quot;1&quot;</code> are considered distinct values.</p>
+<h2>WeakSets</h2>
+<p>Whereas a WeakMap holds its keys weakly (but its values strongly), a WeakSet holds its values weakly (there aren't really keys).</p>
+<pre><code class="language-js">var s = new WeakSet();
+
+var x = { id: 1 },
+    y = { id: 2 };
+
+s.add( x );
+s.add( y );
+
+x = null;                       // `x` is GC-eligible
+y = null;                       // `y` is GC-eligible
+</code></pre>
+<p><strong>Warning:</strong> WeakSet values must be objects, not primitive values as is allowed with sets.</p>
+<h2>Review</h2>
+<p>ES6 defines a number of useful collections that make working with data in structured ways more efficient and effective.</p>
+<p>TypedArrays provide &quot;view&quot;s of binary data buffers that align with various integer types, like 8-bit unsigned integers and 32-bit floats. The array access to binary data makes operations much easier to express and maintain, which enables you to more easily work with complex data like video, audio, canvas data, and so on.</p>
+<p>Maps are key-value pairs where the key can be an object instead of just a string/primitive. Sets are unique lists of values (of any type).</p>
+<p>WeakMaps are maps where the key (object) is weakly held, so that GC is free to collect the entry if it's the last reference to an object. WeakSets are sets where the value is weakly held, again so that GC can remove the entry if it's the last reference to that object.</p>
+</section>
+   </body>
+ </html>

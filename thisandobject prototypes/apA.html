@@ -1,0 +1,198 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>this &amp; Object Prototypes</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: <em>this</em> &amp; Object Prototypes</h1>
+<h1>Appendix A: ES6 <code>class</code></h1>
+<p>If there's any take-away message from the second half of this book (Chapters 4-6), it's that classes are an optional design pattern for code (not a necessary given), and that furthermore they are often quite awkward to implement in a <code>[[Prototype]]</code> language like JavaScript.</p>
+<p>This awkwardness is <em>not</em> just about syntax, although that's a big part of it. Chapters 4 and 5 examined quite a bit of syntactic ugliness, from verbosity of <code>.prototype</code> references cluttering the code, to <em>explicit pseudo-polymorphism</em> (see Chapter 4) when you give methods the same name at different levels of the chain and try to implement a polymorphic reference from a lower-level method to a higher-level method. <code>.constructor</code> being wrongly interpreted as &quot;was constructed by&quot; and yet being unreliable for that definition is yet another syntactic ugly.</p>
+<p>But the problems with class design are much deeper. Chapter 4 points out that classes in traditional class-oriented languages actually produce a <em>copy</em> action from parent to child to instance, whereas in <code>[[Prototype]]</code>, the action is <strong>not</strong> a copy, but rather the opposite -- a delegation link.</p>
+<p>When compared to the simplicity of OLOO-style code and behavior delegation (see Chapter 6), which embrace <code>[[Prototype]]</code> rather than hide from it, classes stand out as a sore thumb in JS.</p>
+<h2><code>class</code></h2>
+<p>But we <em>don't</em> need to re-argue that case again. I re-mention those issues briefly only so that you keep them fresh in your mind now that we turn our attention to the ES6 <code>class</code> mechanism. We'll demonstrate here how it works, and look at whether or not <code>class</code> does anything substantial to address any of those &quot;class&quot; concerns.</p>
+<p>Let's revisit the <code>Widget</code> / <code>Button</code> example from Chapter 6:</p>
+<pre><code class="language-js">class Widget {
+    constructor(width,height) {
+        this.width = width || 50;
+        this.height = height || 50;
+        this.$elem = null;
+    }
+    render($where){
+        if (this.$elem) {
+            this.$elem.css( {
+                width: this.width + &quot;px&quot;,
+                height: this.height + &quot;px&quot;
+            } ).appendTo( $where );
+        }
+    }
+}
+
+class Button extends Widget {
+    constructor(width,height,label) {
+        super( width, height );
+        this.label = label || &quot;Default&quot;;
+        this.$elem = $( &quot;&lt;button&gt;&quot; ).text( this.label );
+    }
+    render($where) {
+        super.render( $where );
+        this.$elem.click( this.onClick.bind( this ) );
+    }
+    onClick(evt) {
+        console.log( &quot;Button '&quot; + this.label + &quot;' clicked!&quot; );
+    }
+}
+</code></pre>
+<p>Beyond this syntax <em>looking</em> nicer, what problems does ES6 solve?</p>
+<ol>
+<li>There's no more (well, sorta, see below!) references to <code>.prototype</code> cluttering the code.</li>
+<li><code>Button</code> is declared directly to &quot;inherit from&quot; (aka <code>extends</code>) <code>Widget</code>, instead of needing to use <code>Object.create(..)</code> to replace a <code>.prototype</code> object that's linked, or having to set with <code>.__proto__</code> or <code>Object.setPrototypeOf(..)</code>.</li>
+<li><code>super(..)</code> now gives us a very helpful <strong>relative polymorphism</strong> capability, so that any method at one level of the chain can refer relatively one level up the chain to a method of the same name. This includes a solution to the note from Chapter 4 about the weirdness of constructors not belonging to their class, and so being unrelated -- <code>super()</code> works inside constructors exactly as you'd expect.</li>
+<li><code>class</code> literal syntax has no affordance for specifying properties (only methods). This might seem limiting to some, but it's expected that the vast majority of cases where a property (state) exists elsewhere but the end-chain &quot;instances&quot;, this is usually a mistake and surprising (as it's state that's implicitly &quot;shared&quot; among all &quot;instances&quot;). So, one <em>could</em> say the <code>class</code> syntax is protecting you from mistakes.</li>
+<li><code>extends</code> lets you extend even built-in object (sub)types, like <code>Array</code> or <code>RegExp</code>, in a very natural way. Doing so without <code>class .. extends</code> has long been an exceedingly complex and frustrating task, one that only the most adept of framework authors have ever been able to accurately tackle. Now, it will be rather trivial!</li>
+</ol>
+<p>In all fairness, those are some substantial solutions to many of the most obvious (syntactic) issues and surprises people have with classical prototype-style code.</p>
+<h2><code>class</code> Gotchas</h2>
+<p>It's not all bubblegum and roses, though. There are still some deep and profoundly troubling issues with using &quot;classes&quot; as a design pattern in JS.</p>
+<p>Firstly, the <code>class</code> syntax may convince you a new &quot;class&quot; mechanism exists in JS as of ES6. <strong>Not so.</strong> <code>class</code> is, mostly, just syntactic sugar on top of the existing <code>[[Prototype]]</code> (delegation!) mechanism.</p>
+<p>That means <code>class</code> is not actually copying definitions statically at declaration time the way it does in traditional class-oriented languages. If you change/replace a method (on purpose or by accident) on the parent &quot;class&quot;, the child &quot;class&quot; and/or instances will still be &quot;affected&quot;, in that they didn't get copies at declaration time, they are all still using the live-delegation model based on <code>[[Prototype]]</code>:</p>
+<pre><code class="language-js">class C {
+    constructor() {
+        this.num = Math.random();
+    }
+    rand() {
+        console.log( &quot;Random: &quot; + this.num );
+    }
+}
+
+var c1 = new C();
+c1.rand(); // &quot;Random: 0.4324299...&quot;
+
+C.prototype.rand = function() {
+    console.log( &quot;Random: &quot; + Math.round( this.num * 1000 ));
+};
+
+var c2 = new C();
+c2.rand(); // &quot;Random: 867&quot;
+
+c1.rand(); // &quot;Random: 432&quot; -- oops!!!
+</code></pre>
+<p>This only seems like reasonable behavior <em>if you already know</em> about the delegation nature of things, rather than expecting <em>copies</em> from &quot;real classes&quot;. So the question to ask yourself is, why are you choosing <code>class</code> syntax for something fundamentally different from classes?</p>
+<p>Doesn't the ES6 <code>class</code> syntax <strong>just make it harder</strong> to see and understand the difference between traditional classes and delegated objects?</p>
+<p><code>class</code> syntax <em>does not</em> provide a way to declare class member properties (only methods). So if you need to do that to track shared state among instances, then you end up going back to the ugly <code>.prototype</code> syntax, like this:</p>
+<pre><code class="language-js">class C {
+    constructor() {
+        // make sure to modify the shared state,
+        // not set a shadowed property on the
+        // instances!
+        C.prototype.count++;
+
+        // here, `this.count` works as expected
+        // via delegation
+        console.log( &quot;Hello: &quot; + this.count );
+    }
+}
+
+// add a property for shared state directly to
+// prototype object
+C.prototype.count = 0;
+
+var c1 = new C();
+// Hello: 1
+
+var c2 = new C();
+// Hello: 2
+
+c1.count === 2; // true
+c1.count === c2.count; // true
+</code></pre>
+<p>The biggest problem here is that it betrays the <code>class</code> syntax by exposing (leakage!) <code>.prototype</code> as an implementation detail.</p>
+<p>But, we also still have the surprise gotcha that <code>this.count++</code> would implicitly create a separate shadowed <code>.count</code> property on both <code>c1</code> and <code>c2</code> objects, rather than updating the shared state. <code>class</code> offers us no consolation from that issue, except (presumably) to imply by lack of syntactic support that you shouldn't be doing that <em>at all</em>.</p>
+<p>Moreover, accidental shadowing is still a hazard:</p>
+<pre><code class="language-js">class C {
+    constructor(id) {
+        // oops, gotcha, we're shadowing `id()` method
+        // with a property value on the instance
+        this.id = id;
+    }
+    id() {
+        console.log( &quot;Id: &quot; + id );
+    }
+}
+
+var c1 = new C( &quot;c1&quot; );
+c1.id(); // TypeError -- `c1.id` is now the string &quot;c1&quot;
+</code></pre>
+<p>There's also some very subtle nuanced issues with how <code>super</code> works. You might assume that <code>super</code> would be bound in an analogous way to how <code>this</code> gets bound (see Chapter 2), which is that <code>super</code> would always be bound to one level higher than whatever the current method's position in the <code>[[Prototype]]</code> chain is.</p>
+<p>However, for performance reasons (<code>this</code> binding is already expensive), <code>super</code> is not bound dynamically. It's bound sort of &quot;statically&quot;, as declaration time. No big deal, right?</p>
+<p>Ehh... maybe, maybe not. If you, like most JS devs, start assigning functions around to different objects (which came from <code>class</code> definitions), in various different ways, you probably won't be very aware that in all those cases, the <code>super</code> mechanism under the covers is having to be re-bound each time.</p>
+<p>And depending on what sorts of syntactic approaches you take to these assignments, there may very well be cases where the <code>super</code> can't be properly bound (at least, not where you suspect), so you may (at time of writing, TC39 discussion is ongoing on the topic) have to manually bind <code>super</code> with <code>toMethod(..)</code> (kinda like you have to do <code>bind(..)</code> for <code>this</code> -- see Chapter 2).</p>
+<p>You're used to being able to assign around methods to different objects to <em>automatically</em> take advantage of the dynamism of <code>this</code> via the <em>implicit binding</em> rule (see Chapter 2). But the same will likely not be true with methods that use <code>super</code>.</p>
+<p>Consider what <code>super</code> should do here (against <code>D</code> and <code>E</code>):</p>
+<pre><code class="language-js">class P {
+    foo() { console.log( &quot;P.foo&quot; ); }
+}
+
+class C extends P {
+    foo() {
+        super();
+    }
+}
+
+var c1 = new C();
+c1.foo(); // &quot;P.foo&quot;
+
+var D = {
+    foo: function() { console.log( &quot;D.foo&quot; ); }
+};
+
+var E = {
+    foo: C.prototype.foo
+};
+
+// Link E to D for delegation
+Object.setPrototypeOf( E, D );
+
+E.foo(); // &quot;P.foo&quot;
+</code></pre>
+<p>If you were thinking (quite reasonably!) that <code>super</code> would be bound dynamically at call-time, you might expect that <code>super()</code> would automatically recognize that <code>E</code> delegates to <code>D</code>, so <code>E.foo()</code> using <code>super()</code> should call to <code>D.foo()</code>.</p>
+<p><strong>Not so.</strong> For performance pragmatism reasons, <code>super</code> is not <em>late bound</em> (aka, dynamically bound) like <code>this</code> is. Instead it's derived at call-time from <code>[[HomeObject]].[[Prototype]]</code>, where <code>[[HomeObject]]</code> is statically bound at creation time.</p>
+<p>In this particular case, <code>super()</code> is still resolving to <code>P.foo()</code>, since the method's <code>[[HomeObject]]</code> is still <code>C</code> and <code>C.[[Prototype]]</code> is <code>P</code>.</p>
+<p>There will <em>probably</em> be ways to manually address such gotchas. Using <code>toMethod(..)</code> to bind/rebind a method's <code>[[HomeObject]]</code> (along with setting the <code>[[Prototype]]</code> of that object!) appears to work in this scenario:</p>
+<pre><code class="language-js">var D = {
+    foo: function() { console.log( &quot;D.foo&quot; ); }
+};
+
+// Link E to D for delegation
+var E = Object.create( D );
+
+// manually bind `foo`s `[[HomeObject]]` as
+// `E`, and `E.[[Prototype]]` is `D`, so thus
+// `super()` is `D.foo()`
+E.foo = C.prototype.foo.toMethod( E, &quot;foo&quot; );
+
+E.foo(); // &quot;D.foo&quot;
+</code></pre>
+<p><strong>Note:</strong> <code>toMethod(..)</code> clones the method, and takes <code>homeObject</code> as its first parameter (which is why we pass <code>E</code>), and the second parameter (optionally) sets a <code>name</code> for the new method (which keep at &quot;foo&quot;).</p>
+<p>It remains to be seen if there are other corner case gotchas that devs will run into beyond this scenario. Regardless, you will have to be diligent and stay aware of which places the engine automatically figures out <code>super</code> for you, and which places you have to manually take care of it. <strong>Ugh!</strong></p>
+<h1>Static &gt; Dynamic?</h1>
+<p>But the biggest problem of all about ES6 <code>class</code> is that all these various gotchas mean <code>class</code> sorta opts you into a syntax which seems to imply (like traditional classes) that once you declare a <code>class</code>, it's a static definition of a (future instantiated) thing. You completely lose sight of the fact <code>C</code> is an object, a concrete thing, which you can directly interact with.</p>
+<p>In traditional class-oriented languages, you never adjust the definition of a class later, so the class design pattern doesn't suggest such capabilities. But <strong>one of the most powerful parts</strong> of JS is that it <em>is</em> dynamic, and the definition of any object is (unless you make it immutable) a fluid and mutable <em>thing</em>.</p>
+<p><code>class</code> seems to imply you shouldn't do such things, by forcing you into the uglier <code>.prototype</code> syntax to do so, or forcing you think about <code>super</code> gotchas, etc. It also offers <em>very little</em> support for any of the pitfalls that this dynamism can bring.</p>
+<p>In other words, it's as if <code>class</code> is telling you: &quot;dynamic is too hard, so it's probably not a good idea. Here's a static-looking syntax, so code your stuff statically.&quot;</p>
+<p>What a sad commentary on JavaScript: <strong>dynamic is too hard, let's pretend to be (but not actually be!) static</strong>.</p>
+<p>These are the reasons why ES6 <code>class</code> is masquerading as a nice solution to syntactic headaches, but it's actually muddying the waters further and making things worse for JS and for clear and concise understanding.</p>
+<p><strong>Note:</strong> If you use the <code>.bind(..)</code> utility to make a hard-bound function (see Chapter 2), the function created is not subclassable with ES6 <code>extend</code> like normal functions are.</p>
+<h2>Review (TL;DR)</h2>
+<p><code>class</code> does a very good job of pretending to fix the problems with the class/inheritance design pattern in JS. But it actually does the opposite: <strong>it hides many of the problems, and introduces other subtle but dangerous ones</strong>.</p>
+<p><code>class</code> contributes to the ongoing confusion of &quot;class&quot; in JavaScript which has plagued the language for nearly two decades. In some respects, it asks more questions than it answers, and it feels in totality like a very unnatural fit on top of the elegant simplicity of the <code>[[Prototype]]</code> mechanism.</p>
+<p>Bottom line: if ES6 <code>class</code> makes it harder to robustly leverage <code>[[Prototype]]</code>, and hides the most important nature of the JS object mechanism -- <strong>the live delegation links between objects</strong> -- shouldn't we see <code>class</code> as creating more troubles than it solves, and just relegate it to an anti-pattern?</p>
+<p>I can't really answer that question for you. But I hope this book has fully explored the issue at a deeper level than you've ever gone before, and has given you the information you need <em>to answer it yourself</em>.</p>
+</section>
+   </body>
+ </html>

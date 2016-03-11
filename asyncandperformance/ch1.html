@@ -1,0 +1,323 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>Async &amp; Performance</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: Async &amp; Performance</h1>
+<h1>Chapter 1: Asynchrony: Now &amp; Later</h1>
+<p>One of the most important and yet often misunderstood parts of programming in a language like JavaScript is how to express and manipulate program behavior spread out over a period of time.</p>
+<p>This is not just about what happens from the beginning of a <code>for</code> loop to the end of a <code>for</code> loop, which of course takes <em>some time</em> (microseconds to milliseconds) to complete. It's about what happens when part of your program runs <em>now</em>, and another part of your program runs <em>later</em> -- there's a gap between <em>now</em> and <em>later</em> where your program isn't actively executing.</p>
+<p>Practically all nontrivial programs ever written (especially in JS) have in some way or another had to manage this gap, whether that be in waiting for user input, requesting data from a database or file system, sending data across the network and waiting for a response, or performing a repeated task at a fixed interval of time (like animation). In all these various ways, your program has to manage state across the gap in time. As they famously say in London (of the chasm between the subway door and the platform): &quot;mind the gap.&quot;</p>
+<p>In fact, the relationship between the <em>now</em> and <em>later</em> parts of your program is at the heart of asynchronous programming.</p>
+<p>Asynchronous programming has been around since the beginning of JS, for sure. But most JS developers have never really carefully considered exactly how and why it crops up in their programs, or explored various <em>other</em> ways to handle it. The <em>good enough</em> approach has always been the humble callback function. Many to this day will insist that callbacks are more than sufficient.</p>
+<p>But as JS continues to grow in both scope and complexity, to meet the ever-widening demands of a first-class programming language that runs in browsers and servers and every conceivable device in between, the pains by which we manage asynchrony are becoming increasingly crippling, and they cry out for approaches that are both more capable and more reason-able.</p>
+<p>While this all may seem rather abstract right now, I assure you we'll tackle it more completely and concretely as we go on through this book. We'll explore a variety of emerging techniques for async JavaScript programming over the next several chapters.</p>
+<p>But before we can get there, we're going to have to understand much more deeply what asynchrony is and how it operates in JS.</p>
+<h2>A Program in Chunks</h2>
+<p>You may write your JS program in one <em>.js</em> file, but your program is almost certainly comprised of several chunks, only one of which is going to execute <em>now</em>, and the rest of which will execute <em>later</em>. The most common unit of <em>chunk</em> is the <code>function</code>.</p>
+<p>The problem most developers new to JS seem to have is that <em>later</em> doesn't happen strictly and immediately after <em>now</em>. In other words, tasks that cannot complete <em>now</em> are, by definition, going to complete asynchronously, and thus we will not have blocking behavior as you might intuitively expect or want.</p>
+<p>Consider:</p>
+<pre><code class="js">// ajax(..) is some arbitrary Ajax function given by a library
+var data = ajax( &quot;http://some.url.1&quot; );
+
+console.log( data );
+// Oops! `data` generally won't have the Ajax results
+</code></pre>
+<p>You're probably aware that standard Ajax requests don't complete synchronously, which means the <code>ajax(..)</code> function does not yet have any value to return back to be assigned to <code>data</code> variable. If <code>ajax(..)</code> <em>could</em> block until the response came back, then the <code>data = ..</code> assignment would work fine.</p>
+<p>But that's not how we do Ajax. We make an asynchronous Ajax request <em>now</em>, and we won't get the results back until <em>later</em>.</p>
+<p>The simplest (but definitely not only, or necessarily even best!) way of &quot;waiting&quot; from <em>now</em> until <em>later</em> is to use a function, commonly called a callback function:</p>
+<pre><code class="language-js">// ajax(..) is some arbitrary Ajax function given by a library
+ajax( &quot;http://some.url.1&quot;, function myCallbackFunction(data){
+
+    console.log( data ); // Yay, I gots me some `data`!
+
+} );
+</code></pre>
+<p><strong>Warning:</strong> You may have heard that it's possible to make synchronous Ajax requests. While that's technically true, you should never, ever do it, under any circumstances, because it locks the browser UI (buttons, menus, scrolling, etc.) and prevents any user interaction whatsoever. This is a terrible idea, and should always be avoided.</p>
+<p>Before you protest in disagreement, no, your desire to avoid the mess of callbacks is <em>not</em> justification for blocking, synchronous Ajax.</p>
+<p>For example, consider this code:</p>
+<pre><code class="language-js">function now() {
+    return 21;
+}
+
+function later() {
+    answer = answer * 2;
+    console.log( &quot;Meaning of life:&quot;, answer );
+}
+
+var answer = now();
+
+setTimeout( later, 1000 ); // Meaning of life: 42
+</code></pre>
+<p>There are two chunks to this program: the stuff that will run <em>now</em>, and the stuff that will run <em>later</em>. It should be fairly obvious what those two chunks are, but let's be super explicit:</p>
+<p>Now:</p>
+<pre><code class="language-js">function now() {
+    return 21;
+}
+
+function later() { .. }
+
+var answer = now();
+
+setTimeout( later, 1000 );
+</code></pre>
+<p>Later:</p>
+<pre><code class="language-js">answer = answer * 2;
+console.log( &quot;Meaning of life:&quot;, answer );
+</code></pre>
+<p>The <em>now</em> chunk runs right away, as soon as you execute your program. But <code>setTimeout(..)</code> also sets up an event (a timeout) to happen <em>later</em>, so the contents of the <code>later()</code> function will be executed at a later time (1,000 milliseconds from now).</p>
+<p>Any time you wrap a portion of code into a <code>function</code> and specify that it should be executed in response to some event (timer, mouse click, Ajax response, etc.), you are creating a <em>later</em> chunk of your code, and thus introducing asynchrony to your program.</p>
+<h3>Async Console</h3>
+<p>There is no specification or set of requirements around how the <code>console.*</code> methods work -- they are not officially part of JavaScript, but are instead added to JS by the <em>hosting environment</em> (see the <em>Types &amp; Grammar</em> title of this book series).</p>
+<p>So, different browsers and JS environments do as they please, which can sometimes lead to confusing behavior.</p>
+<p>In particular, there are some browsers and some conditions that <code>console.log(..)</code> does not actually immediately output what it's given. The main reason this may happen is because I/O is a very slow and blocking part of many programs (not just JS). So, it may perform better (from the page/UI perspective) for a browser to handle <code>console</code> I/O asynchronously in the background, without you perhaps even knowing that occurred.</p>
+<p>A not terribly common, but possible, scenario where this could be <em>observable</em> (not from code itself but from the outside):</p>
+<pre><code class="language-js">var a = {
+    index: 1
+};
+
+// later
+console.log( a ); // ??
+
+// even later
+a.index++;
+</code></pre>
+<p>We'd normally expect to see the <code>a</code> object be snapshotted at the exact moment of the <code>console.log(..)</code> statement, printing something like <code>{ index: 1 }</code>, such that in the next statement when <code>a.index++</code> happens, it's modifying something different than, or just strictly after, the output of <code>a</code>.</p>
+<p>Most of the time, the preceding code will probably produce an object representation in your developer tools' console that's what you'd expect. But it's possible this same code could run in a situation where the browser felt it needed to defer the console I/O to the background, in which case it's <em>possible</em> that by the time the object is represented in the browser console, the <code>a.index++</code> has already happened, and it shows <code>{ index: 2 }</code>.</p>
+<p>It's a moving target under what conditions exactly <code>console</code> I/O will be deferred, or even whether it will be observable. Just be aware of this possible asynchronicity in I/O in case you ever run into issues in debugging where objects have been modified <em>after</em> a <code>console.log(..)</code> statement and yet you see the unexpected modifications show up.</p>
+<p><strong>Note:</strong> If you run into this rare scenario, the best option is to use breakpoints in your JS debugger instead of relying on <code>console</code> output. The next best option would be to force a &quot;snapshot&quot; of the object in question by serializing it to a <code>string</code>, like with <code>JSON.stringify(..)</code>.</p>
+<h2>Event Loop</h2>
+<p>Let's make a (perhaps shocking) claim: despite clearly allowing asynchronous JS code (like the timeout we just looked at), up until recently (ES6), JavaScript itself has actually never had any direct notion of asynchrony built into it.</p>
+<p><strong>What!?</strong> That seems like a crazy claim, right? In fact, it's quite true. The JS engine itself has never done anything more than execute a single chunk of your program at any given moment, when asked to.</p>
+<p>&quot;Asked to.&quot; By whom? That's the important part!</p>
+<p>The JS engine doesn't run in isolation. It runs inside a <em>hosting environment</em>, which is for most developers the typical web browser. Over the last several years (but by no means exclusively), JS has expanded beyond the browser into other environments, such as servers, via things like Node.js. In fact, JavaScript gets embedded into all kinds of devices these days, from robots to lightbulbs.</p>
+<p>But the one common &quot;thread&quot; (that's a not-so-subtle asynchronous joke, for what it's worth) of all these environments is that they have a mechanism in them that handles executing multiple chunks of your program <em>over time</em>, at each moment invoking the JS engine, called the &quot;event loop.&quot;</p>
+<p>In other words, the JS engine has had no innate sense of <em>time</em>, but has instead been an on-demand execution environment for any arbitrary snippet of JS. It's the surrounding environment that has always <em>scheduled</em> &quot;events&quot; (JS code executions).</p>
+<p>So, for example, when your JS program makes an Ajax request to fetch some data from a server, you set up the &quot;response&quot; code in a function (commonly called a &quot;callback&quot;), and the JS engine tells the hosting environment, &quot;Hey, I'm going to suspend execution for now, but whenever you finish with that network request, and you have some data, please <em>call</em> this function <em>back</em>.&quot;</p>
+<p>The browser is then set up to listen for the response from the network, and when it has something to give you, it schedules the callback function to be executed by inserting it into the <em>event loop</em>.</p>
+<p>So what is the <em>event loop</em>?</p>
+<p>Let's conceptualize it first through some fake-ish code:</p>
+<pre><code class="language-js">// `eventLoop` is an array that acts as a queue (first-in, first-out)
+var eventLoop = [ ];
+var event;
+
+// keep going &quot;forever&quot;
+while (true) {
+    // perform a &quot;tick&quot;
+    if (eventLoop.length &gt; 0) {
+        // get the next event in the queue
+        event = eventLoop.shift();
+
+        // now, execute the next event
+        try {
+            event();
+        }
+        catch (err) {
+            reportError(err);
+        }
+    }
+}
+</code></pre>
+<p>This is, of course, vastly simplified pseudocode to illustrate the concepts. But it should be enough to help get a better understanding.</p>
+<p>As you can see, there's a continuously running loop represented by the <code>while</code> loop, and each iteration of this loop is called a &quot;tick.&quot; For each tick, if an event is waiting on the queue, it's taken off and executed. These events are your function callbacks.</p>
+<p>It's important to note that <code>setTimeout(..)</code> doesn't put your callback on the event loop queue. What it does is set up a timer; when the timer expires, the environment places your callback into the event loop, such that some future tick will pick it up and execute it.</p>
+<p>What if there are already 20 items in the event loop at that moment? Your callback waits. It gets in line behind the others -- there's not normally a path for preempting the queue and skipping ahead in line. This explains why <code>setTimeout(..)</code> timers may not fire with perfect temporal accuracy. You're guaranteed (roughly speaking) that your callback won't fire <em>before</em> the time interval you specify, but it can happen at or after that time, depending on the state of the event queue.</p>
+<p>So, in other words, your program is generally broken up into lots of small chunks, which happen one after the other in the event loop queue. And technically, other events not related directly to your program can be interleaved within the queue as well.</p>
+<p><strong>Note:</strong> We mentioned &quot;up until recently&quot; in relation to ES6 changing the nature of where the event loop queue is managed. It's mostly a formal technicality, but ES6 now specifies how the event loop works, which means technically it's within the purview of the JS engine, rather than just the <em>hosting environment</em>. One main reason for this change is the introduction of ES6 Promises, which we'll discuss in Chapter 3, because they require the ability to have direct, fine-grained control over scheduling operations on the event loop queue (see the discussion of <code>setTimeout(..0)</code> in the &quot;Cooperation&quot; section).</p>
+<h2>Parallel Threading</h2>
+<p>It's very common to conflate the terms &quot;async&quot; and &quot;parallel,&quot; but they are actually quite different. Remember, async is about the gap between <em>now</em> and <em>later</em>. But parallel is about things being able to occur simultaneously.</p>
+<p>The most common tools for parallel computing are processes and threads. Processes and threads execute independently and may execute simultaneously: on separate processors, or even separate computers, but multiple threads can share the memory of a single process.</p>
+<p>An event loop, by contrast, breaks its work into tasks and executes them in serial, disallowing parallel access and changes to shared memory. Parallelism and &quot;serialism&quot; can coexist in the form of cooperating event loops in separate threads.</p>
+<p>The interleaving of parallel threads of execution and the interleaving of asynchronous events occur at very different levels of granularity.</p>
+<p>For example:</p>
+<pre><code class="language-js">function later() {
+    answer = answer * 2;
+    console.log( &quot;Meaning of life:&quot;, answer );
+}
+</code></pre>
+<p>While the entire contents of <code>later()</code> would be regarded as a single event loop queue entry, when thinking about a thread this code would run on, there's actually perhaps a dozen different low-level operations. For example, <code>answer = answer * 2</code> requires first loading the current value of <code>answer</code>, then putting <code>2</code> somewhere, then performing the multiplication, then taking the result and storing it back into <code>answer</code>.</p>
+<p>In a single-threaded environment, it really doesn't matter that the items in the thread queue are low-level operations, because nothing can interrupt the thread. But if you have a parallel system, where two different threads are operating in the same program, you could very likely have unpredictable behavior.</p>
+<p>Consider:</p>
+<pre><code class="language-js">var a = 20;
+
+function foo() {
+    a = a + 1;
+}
+
+function bar() {
+    a = a * 2;
+}
+
+// ajax(..) is some arbitrary Ajax function given by a library
+ajax( &quot;http://some.url.1&quot;, foo );
+ajax( &quot;http://some.url.2&quot;, bar );
+</code></pre>
+<p>In JavaScript's single-threaded behavior, if <code>foo()</code> runs before <code>bar()</code>, the result is that <code>a</code> has <code>42</code>, but if <code>bar()</code> runs before <code>foo()</code> the result in <code>a</code> will be <code>41</code>.</p>
+<p>If JS events sharing the same data executed in parallel, though, the problems would be much more subtle. Consider these two lists of pseudocode tasks as the threads that could respectively run the code in <code>foo()</code> and <code>bar()</code>, and consider what happens if they are running at exactly the same time:</p>
+<p>Thread 1 (<code>X</code> and <code>Y</code> are temporary memory locations):</p>
+<pre><code>foo():
+  a. load value of `a` in `X`
+  b. store `1` in `Y`
+  c. add `X` and `Y`, store result in `X`
+  d. store value of `X` in `a`
+</code></pre>
+<p>Thread 2 (<code>X</code> and <code>Y</code> are temporary memory locations):</p>
+<pre><code>bar():
+  a. load value of `a` in `X`
+  b. store `2` in `Y`
+  c. multiply `X` and `Y`, store result in `X`
+  d. store value of `X` in `a`
+</code></pre>
+<p>Now, let's say that the two threads are running truly in parallel. You can probably spot the problem, right? They use shared memory locations <code>X</code> and <code>Y</code> for their temporary steps.</p>
+<p>What's the end result in <code>a</code> if the steps happen like this?</p>
+<pre><code>1a  (load value of `a` in `X`   ==&gt; `20`)
+2a  (load value of `a` in `X`   ==&gt; `20`)
+1b  (store `1` in `Y`   ==&gt; `1`)
+2b  (store `2` in `Y`   ==&gt; `2`)
+1c  (add `X` and `Y`, store result in `X`   ==&gt; `22`)
+1d  (store value of `X` in `a`   ==&gt; `22`)
+2c  (multiply `X` and `Y`, store result in `X`   ==&gt; `44`)
+2d  (store value of `X` in `a`   ==&gt; `44`)
+</code></pre>
+<p>The result in <code>a</code> will be <code>44</code>. But what about this ordering?</p>
+<pre><code>1a  (load value of `a` in `X`   ==&gt; `20`)
+2a  (load value of `a` in `X`   ==&gt; `20`)
+2b  (store `2` in `Y`   ==&gt; `2`)
+1b  (store `1` in `Y`   ==&gt; `1`)
+2c  (multiply `X` and `Y`, store result in `X`   ==&gt; `20`)
+1c  (add `X` and `Y`, store result in `X`   ==&gt; `21`)
+1d  (store value of `X` in `a`   ==&gt; `21`)
+2d  (store value of `X` in `a`   ==&gt; `21`)
+</code></pre>
+<p>The result in <code>a</code> will be <code>21</code>.</p>
+<p>So, threaded programming is very tricky, because if you don't take special steps to prevent this kind of interruption/interleaving from happening, you can get very surprising, nondeterministic behavior that frequently leads to headaches.</p>
+<p>JavaScript never shares data across threads, which means <em>that</em> level of nondeterminism isn't a concern. But that doesn't mean JS is always deterministic. Remember earlier, where the relative ordering of <code>foo()</code> and <code>bar()</code> produces two different results (<code>41</code> or <code>42</code>)?</p>
+<p><strong>Note:</strong> It may not be obvious yet, but not all nondeterminism is bad. Sometimes it's irrelevant, and sometimes it's intentional. We'll see more examples of that throughout this and the next few chapters.</p>
+<h3>Run-to-Completion</h3>
+<p>Because of JavaScript's single-threading, the code inside of <code>foo()</code> (and <code>bar()</code>) is atomic, which means that once <code>foo()</code> starts running, the entirety of its code will finish before any of the code in <code>bar()</code> can run, or vice versa. This is called &quot;run-to-completion&quot; behavior.</p>
+<p>In fact, the run-to-completion semantics are more obvious when <code>foo()</code> and <code>bar()</code> have more code in them, such as:</p>
+<pre><code class="language-js">var a = 1;
+var b = 2;
+
+function foo() {
+    a++;
+    b = b * a;
+    a = b + 3;
+}
+
+function bar() {
+    b--;
+    a = 8 + b;
+    b = a * 2;
+}
+
+// ajax(..) is some arbitrary Ajax function given by a library
+ajax( &quot;http://some.url.1&quot;, foo );
+ajax( &quot;http://some.url.2&quot;, bar );
+</code></pre>
+<p>Because <code>foo()</code> can't be interrupted by <code>bar()</code>, and <code>bar()</code> can't be interrupted by <code>foo()</code>, this program only has two possible outcomes depending on which starts running first -- if threading were present, and the individual statements in <code>foo()</code> and <code>bar()</code> could be interleaved, the number of possible outcomes would be greatly increased!</p>
+<p>Chunk 1 is synchronous (happens <em>now</em>), but chunks 2 and 3 are asynchronous (happen <em>later</em>), which means their execution will be separated by a gap of time.</p>
+<p>Chunk 1:</p>
+<pre><code class="language-js">var a = 1;
+var b = 2;
+</code></pre>
+<p>Chunk 2 (<code>foo()</code>):</p>
+<pre><code class="language-js">a++;
+b = b * a;
+a = b + 3;
+</code></pre>
+<p>Chunk 3 (<code>bar()</code>):</p>
+<pre><code class="language-js">b--;
+a = 8 + b;
+b = a * 2;
+</code></pre>
+<p>Chunks 2 and 3 may happen in either-first order, so there are two possible outcomes for this program, as illustrated here:</p>
+<p>Outcome 1:</p>
+<pre><code class="language-js">var a = 1;
+var b = 2;
+
+// foo()
+a++;
+b = b * a;
+a = b + 3;
+
+// bar()
+b--;
+a = 8 + b;
+b = a * 2;
+
+a; // 11
+b; // 22
+</code></pre>
+<p>Outcome 2:</p>
+<pre><code class="language-js">var a = 1;
+var b = 2;
+
+// bar()
+b--;
+a = 8 + b;
+b = a * 2;
+
+// foo()
+a++;
+b = b * a;
+a = b + 3;
+
+a; // 183
+b; // 180
+</code></pre>
+<p>Two outcomes from the same code means we still have nondeterminism! But it's at the function (event) ordering level, rather than at the statement ordering level (or, in fact, the expression operation ordering level) as it is with threads. In other words, it's <em>more deterministic</em> than threads would have been.</p>
+<p>As applied to JavaScript's behavior, this function-ordering nondeterminism is the common term &quot;race condition,&quot; as <code>foo()</code> and <code>bar()</code> are racing against each other to see which runs first. Specifically, it's a &quot;race condition&quot; because you cannot predict reliably how <code>a</code> and <code>b</code> will turn out.</p>
+<p><strong>Note:</strong> If there was a function in JS that somehow did not have run-to-completion behavior, we could have many more possible outcomes, right? It turns out ES6 introduces just such a thing (see Chapter 4 &quot;Generators&quot;), but don't worry right now, we'll come back to that!</p>
+<h2>Concurrency</h2>
+<p>Let's imagine a site that displays a list of status updates (like a social network news feed) that progressively loads as the user scrolls down the list. To make such a feature work correctly, (at least) two separate &quot;processes&quot; will need to be executing <em>simultaneously</em> (i.e., during the same window of time, but not necessarily at the same instant).</p>
+<p><strong>Note:</strong> We're using &quot;process&quot; in quotes here because they aren't true operating system–level processes in the computer science sense. They're virtual processes, or tasks, that represent a logically connected, sequential series of operations. We'll simply prefer &quot;process&quot; over &quot;task&quot; because terminology-wise, it will match the definitions of the concepts we're exploring.</p>
+<p>The first &quot;process&quot; will respond to <code>onscroll</code> events (making Ajax requests for new content) as they fire when the user has scrolled the page further down. The second &quot;process&quot; will receive Ajax responses back (to render content onto the page).</p>
+<p>Obviously, if a user scrolls fast enough, you may see two or more <code>onscroll</code> events fired during the time it takes to get the first response back and process, and thus you're going to have <code>onscroll</code> events and Ajax response events firing rapidly, interleaved with each other.</p>
+<p>Concurrency is when two or more &quot;processes&quot; are executing simultaneously over the same period, regardless of whether their individual constituent operations happen <em>in parallel</em> (at the same instant on separate processors or cores) or not. You can think of concurrency then as &quot;process&quot;-level (or task-level) parallelism, as opposed to operation-level parallelism (separate-processor threads).</p>
+<p><strong>Note:</strong> Concurrency also introduces an optional notion of these &quot;processes&quot; interacting with each other. We'll come back to that later.</p>
+<p>For a given window of time (a few seconds worth of a user scrolling), let's visualize each independent &quot;process&quot; as a series of events/operations:</p>
+<p>&quot;Process&quot; 1 (<code>onscroll</code> events):</p>
+<pre><code>onscroll, request 1
+onscroll, request 2
+onscroll, request 3
+onscroll, request 4
+onscroll, request 5
+onscroll, request 6
+onscroll, request 7
+</code></pre>
+<p>&quot;Process&quot; 2 (Ajax response events):</p>
+<pre><code>response 1
+response 2
+response 3
+response 4
+response 5
+response 6
+response 7
+</code></pre>
+<p>It's quite possible that an <code>onscroll</code> event and an Ajax response event could be ready to be processed at exactly the same <em>moment</em>. For example let's visualize these events in a timeline:</p>
+<pre><code>onscroll, request 1
+onscroll, request 2          response 1
+onscroll, request 3          response 2
+response 3
+onscroll, request 4
+onscroll, request 5
+onscroll, request 6          response 4
+onscroll, request 7
+response 6
+response 5
+response 7
+</code></pre>
+<p>But, going back to our notion of the event loop from earlier in the chapter, JS is only going to be able to handle one event at a time, so either <code>onscroll, request 2</code> is going to happen first or <code>response 1</code> is going to happen first, but they cannot happen at literally the same moment. Just like kids at a school cafeteria, no matter what crowd they form outside the doors, they'll have to merge into a single line to get their lunch!</p>
+<p>Let's visualize the interleaving of all these events onto the event loop queue.</p>
+<p>Event Loop Queue:</p>
+<pre><code>onscroll, request 1   &lt;
+</code></pre>
+</section>
+   </body>
+ </html>

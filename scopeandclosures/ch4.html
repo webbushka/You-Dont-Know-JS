@@ -1,0 +1,165 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>Scope &amp; Closures</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: Scope &amp; Closures</h1>
+<h1>Chapter 4: Hoisting</h1>
+<p>By now, you should be fairly comfortable with the idea of scope, and how variables are attached to different levels of scope depending on where and how they are declared. Both function scope and block scope behave by the same rules in this regard: any variable declared within a scope is attached to that scope.</p>
+<p>But there's a subtle detail of how scope attachment works with declarations that appear in various locations within a scope, and that detail is what we will examine here.</p>
+<h2>Chicken Or The Egg?</h2>
+<p>There's a temptation to think that all of the code you see in a JavaScript program is interpreted line-by-line, top-down in order, as the program executes. While that is substantially true, there's one part of that assumption which can lead to incorrect thinking about your program.</p>
+<p>Consider this code:</p>
+<pre><code class="language-js">a = 2;
+
+var a;
+
+console.log( a );
+</code></pre>
+<p>What do you expect to be printed in the <code>console.log(..)</code> statement?</p>
+<p>Many developers would expect <code>undefined</code>, since the <code>var a</code> statement comes after the <code>a = 2</code>, and it would seem natural to assume that the variable is re-defined, and thus assigned the default <code>undefined</code>. However, the output will be <code>2</code>.</p>
+<p>Consider another piece of code:</p>
+<pre><code class="language-js">console.log( a );
+
+var a = 2;
+</code></pre>
+<p>You might be tempted to assume that, since the previous snippet exhibited some less-than-top-down looking behavior, perhaps in this snippet, <code>2</code> will also be printed. Others may think that since the <code>a</code> variable is used before it is declared, this must result in a <code>ReferenceError</code> being thrown.</p>
+<p>Unfortunately, both guesses are incorrect. <code>undefined</code> is the output.</p>
+<p><strong>So, what's going on here?</strong> It would appear we have a chicken-and-the-egg question. Which comes first, the declaration (&quot;egg&quot;), or the assignment (&quot;chicken&quot;)?</p>
+<h2>The Compiler Strikes Again</h2>
+<p>To answer this question, we need to refer back to Chapter 1, and our discussion of compilers. Recall that the <em>Engine</em> actually will compile your JavaScript code before it interprets it. Part of the compilation phase was to find and associate all declarations with their appropriate scopes. Chapter 2 showed us that this is the heart of Lexical Scope.</p>
+<p>So, the best way to think about things is that all declarations, both variables and functions, are processed first, before any part of your code is executed.</p>
+<p>When you see <code>var a = 2;</code>, you probably think of that as one statement. But JavaScript actually thinks of it as two statements: <code>var a;</code> and <code>a = 2;</code>. The first statement, the declaration, is processed during the compilation phase. The second statement, the assignment, is left <strong>in place</strong> for the execution phase.</p>
+<p>Our first snippet then should be thought of as being handled like this:</p>
+<pre><code class="language-js">var a;
+</code></pre>
+<pre><code class="language-js">a = 2;
+
+console.log( a );
+</code></pre>
+<p>...where the first part is the compilation and the second part is the execution.</p>
+<p>Similarly, our second snippet is actually processed as:</p>
+<pre><code class="language-js">var a;
+</code></pre>
+<pre><code class="language-js">console.log( a );
+
+a = 2;
+</code></pre>
+<p>So, one way of thinking, sort of metaphorically, about this process, is that variable and function declarations are &quot;moved&quot; from where they appear in the flow of the code to the top of the code. This gives rise to the name &quot;Hoisting&quot;.</p>
+<p>In other words, <strong>the egg (declaration) comes before the chicken (assignment)</strong>.</p>
+<p><strong>Note:</strong> Only the declarations themselves are hoisted, while any assignments or other executable logic are left <em>in place</em>. If hoisting were to re-arrange the executable logic of our code, that could wreak havoc.</p>
+<pre><code class="language-js">foo();
+
+function foo() {
+    console.log( a ); // undefined
+
+    var a = 2;
+}
+</code></pre>
+<p>The function <code>foo</code>'s declaration (which in this case <em>includes</em> the implied value of it as an actual function) is hoisted, such that the call on the first line is able to execute.</p>
+<p>It's also important to note that hoisting is <strong>per-scope</strong>. So while our previous snippets were simplified in that they only included global scope, the <code>foo(..)</code> function we are now examining itself exhibits that <code>var a</code> is hoisted to the top of <code>foo(..)</code> (not, obviously, to the top of the program). So the program can perhaps be more accurately interpreted like this:</p>
+<pre><code class="language-js">function foo() {
+    var a;
+
+    console.log( a ); // undefined
+
+    a = 2;
+}
+
+foo();
+</code></pre>
+<p>Function declarations are hoisted, as we just saw. But function expressions are not.</p>
+<pre><code class="language-js">foo(); // not ReferenceError, but TypeError!
+
+var foo = function bar() {
+    // ...
+};
+</code></pre>
+<p>The variable identifier <code>foo</code> is hoisted and attached to the enclosing scope (global) of this program, so <code>foo()</code> doesn't fail as a <code>ReferenceError</code>. But <code>foo</code> has no value yet (as it would if it had been a true function declaration instead of expression). So, <code>foo()</code> is attempting to invoke the <code>undefined</code> value, which is a <code>TypeError</code> illegal operation.</p>
+<p>Also recall that even though it's a named function expression, the name identifier is not available in the enclosing scope:</p>
+<pre><code class="language-js">foo(); // TypeError
+bar(); // ReferenceError
+
+var foo = function bar() {
+    // ...
+};
+</code></pre>
+<p>This snippet is more accurately interpreted (with hoisting) as:</p>
+<pre><code class="language-js">var foo;
+
+foo(); // TypeError
+bar(); // ReferenceError
+
+foo = function() {
+    var bar = ...self...
+    // ...
+}
+</code></pre>
+<h2>Functions First</h2>
+<p>Both function declarations and variable declarations are hoisted. But a subtle detail (that <em>can</em> show up in code with multiple &quot;duplicate&quot; declarations) is that functions are hoisted first, and then variables.</p>
+<p>Consider:</p>
+<pre><code class="language-js">foo(); // 1
+
+var foo;
+
+function foo() {
+    console.log( 1 );
+}
+
+foo = function() {
+    console.log( 2 );
+};
+</code></pre>
+<p><code>1</code> is printed instead of <code>2</code>! This snippet is interpreted by the <em>Engine</em> as:</p>
+<pre><code class="language-js">function foo() {
+    console.log( 1 );
+}
+
+foo(); // 1
+
+foo = function() {
+    console.log( 2 );
+};
+</code></pre>
+<p>Notice that <code>var foo</code> was the duplicate (and thus ignored) declaration, even though it came before the <code>function foo()...</code> declaration, because function declarations are hoisted before normal variables.</p>
+<p>While multiple/duplicate <code>var</code> declarations are effectively ignored, subsequent function declarations <em>do</em> override previous ones.</p>
+<pre><code class="language-js">foo(); // 3
+
+function foo() {
+    console.log( 1 );
+}
+
+var foo = function() {
+    console.log( 2 );
+};
+
+function foo() {
+    console.log( 3 );
+}
+</code></pre>
+<p>While this all may sound like nothing more than interesting academic trivia, it highlights the fact that duplicate definitions in the same scope are a really bad idea and will often lead to confusing results.</p>
+<p>Function declarations that appear inside of normal blocks typically hoist to the enclosing scope, rather than being conditional as this code implies:</p>
+<pre><code class="language-js">foo(); // &quot;b&quot;
+
+var a = true;
+if (a) {
+   function foo() { console.log( &quot;a&quot; ); }
+}
+else {
+   function foo() { console.log( &quot;b&quot; ); }
+}
+</code></pre>
+<p>However, it's important to note that this behavior is not reliable and is subject to change in future versions of JavaScript, so it's probably best to avoid declaring functions in blocks.</p>
+<h2>Review (TL;DR)</h2>
+<p>We can be tempted to look at <code>var a = 2;</code> as one statement, but the JavaScript <em>Engine</em> does not see it that way. It sees <code>var a</code> and <code>a = 2</code> as two separate statements, the first one a compiler-phase task, and the second one an execution-phase task.</p>
+<p>What this leads to is that all declarations in a scope, regardless of where they appear, are processed <em>first</em> before the code itself is executed. You can visualize this as declarations (variables and functions) being &quot;moved&quot; to the top of their respective scopes, which we call &quot;hoisting&quot;.</p>
+<p>Declarations themselves are hoisted, but assignments, even assignments of function expressions, are <em>not</em> hoisted.</p>
+<p>Be careful about duplicate declarations, especially mixed between normal var declarations and function declarations -- peril awaits if you do!</p>
+</section>
+   </body>
+ </html>

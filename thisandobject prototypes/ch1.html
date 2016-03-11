@@ -1,0 +1,227 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>this &amp; Object Prototypes</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: <em>this</em> &amp; Object Prototypes</h1>
+<h1>Chapter 1: <code>this</code> Or That?</h1>
+<p>One of the most confused mechanisms in JavaScript is the <code>this</code> keyword. It's a special identifier keyword that's automatically defined in the scope of every function, but what exactly it refers to bedevils even seasoned JavaScript developers.</p>
+<blockquote>
+<p>Any sufficiently <em>advanced</em> technology is indistinguishable from magic. -- Arthur C. Clarke</p>
+</blockquote>
+<p>JavaScript's <code>this</code> mechanism isn't actually <em>that</em> advanced, but developers often paraphrase that quote in their own mind by inserting &quot;complex&quot; or &quot;confusing&quot;, and there's no question that without lack of clear understanding, <code>this</code> can seem downright magical in <em>your</em> confusion.</p>
+<p><strong>Note:</strong> The word &quot;this&quot; is a terribly common pronoun in general discourse. So, it can be very difficult, especially verbally, to determine whether we are using &quot;this&quot; as a pronoun or using it to refer to the actual keyword identifier. For clarity, I will always use <code>this</code> to refer to the special keyword, and &quot;this&quot; or <em>this</em> or this otherwise.</p>
+<h2>Why <code>this</code>?</h2>
+<p>If the <code>this</code> mechanism is so confusing, even to seasoned JavaScript developers, one may wonder why it's even useful? Is it more trouble than it's worth? Before we jump into the <em>how</em>, we should examine the <em>why</em>.</p>
+<p>Let's try to illustrate the motivation and utility of <code>this</code>:</p>
+<pre><code class="language-js">function identify() {
+    return this.name.toUpperCase();
+}
+
+function speak() {
+    var greeting = &quot;Hello, I'm &quot; + identify.call( this );
+    console.log( greeting );
+}
+
+var me = {
+    name: &quot;Kyle&quot;
+};
+
+var you = {
+    name: &quot;Reader&quot;
+};
+
+identify.call( me ); // KYLE
+identify.call( you ); // READER
+
+speak.call( me ); // Hello, I'm KYLE
+speak.call( you ); // Hello, I'm READER
+</code></pre>
+<p>If the <em>how</em> of this snippet confuses you, don't worry! We'll get to that shortly. Just set those questions aside briefly so we can look into the <em>why</em> more clearly.</p>
+<p>This code snippet allows the <code>identify()</code> and <code>speak()</code> functions to be re-used against multiple <em>context</em> (<code>me</code> and <code>you</code>) objects, rather than needing a separate version of the function for each object.</p>
+<p>Instead of relying on <code>this</code>, you could have explicitly passed in a context object to both <code>identify()</code> and <code>speak()</code>.</p>
+<pre><code class="language-js">function identify(context) {
+    return context.name.toUpperCase();
+}
+
+function speak(context) {
+    var greeting = &quot;Hello, I'm &quot; + identify( context );
+    console.log( greeting );
+}
+
+identify( you ); // READER
+speak( me ); // Hello, I'm KYLE
+</code></pre>
+<p>However, the <code>this</code> mechanism provides a more elegant way of implicitly &quot;passing along&quot; an object reference, leading to cleaner API design and easier re-use.</p>
+<p>The more complex your usage pattern is, the more clearly you'll see that passing context around as an explicit parameter is often messier than passing around a <code>this</code> context. When we explore objects and prototypes, you will see the helpfulness of a collection of functions being able to automatically reference the proper context object.</p>
+<h2>Confusions</h2>
+<p>We'll soon begin to explain how <code>this</code> <em>actually</em> works, but first we must  dispel some misconceptions about how it <em>doesn't</em> actually work.</p>
+<p>The name &quot;this&quot; creates confusion when developers try to think about it too literally. There are two meanings often assumed, but both are incorrect.</p>
+<h3>Itself</h3>
+<p>The first common temptation is to assume <code>this</code> refers to the function itself. That's a reasonable grammatical inference, at least.</p>
+<p>Why would you want to refer to a function from inside itself? The most common reasons would be things like recursion (calling a function from inside itself) or having an event handler that can unbind itself when it's first called.</p>
+<p>Developers new to JS's mechanisms often think that referencing the function as an object (all functions in JavaScript are objects!) lets you store <em>state</em> (values in properties) between function calls. While this is certainly possible and has some limited uses, the rest of the book will expound on many other patterns for <em>better</em> places to store state besides the function object.</p>
+<p>But for just a moment, we'll explore that pattern, to illustrate how <code>this</code> doesn't let a function get a reference to itself like we might have assumed.</p>
+<p>Consider the following code, where we attempt to track how many times a function (<code>foo</code>) was called:</p>
+<pre><code class="language-js">function foo(num) {
+    console.log( &quot;foo: &quot; + num );
+
+    // keep track of how many times `foo` is called
+    this.count++;
+}
+
+foo.count = 0;
+
+var i;
+
+for (i=0; i&lt;10; i++) {
+    if (i &gt; 5) {
+        foo( i );
+    }
+}
+// foo: 6
+// foo: 7
+// foo: 8
+// foo: 9
+
+// how many times was `foo` called?
+console.log( foo.count ); // 0 -- WTF?
+</code></pre>
+<p><code>foo.count</code> is <em>still</em> <code>0</code>, even though the four <code>console.log</code> statements clearly indicate <code>foo(..)</code> was in fact called four times. The frustration stems from a <em>too literal</em> interpretation of what <code>this</code> (in <code>this.count++</code>) means.</p>
+<p>When the code executes <code>foo.count = 0</code>, indeed it's adding a property <code>count</code> to the function object <code>foo</code>. But for the <code>this.count</code> reference inside of the function, <code>this</code> is not in fact pointing <em>at all</em> to that function object, and so even though the property names are the same, the root objects are different, and confusion ensues.</p>
+<p><strong>Note:</strong> A responsible developer <em>should</em> ask at this point, &quot;If I was incrementing a <code>count</code> property but it wasn't the one I expected, which <code>count</code> <em>was</em> I incrementing?&quot; In fact, were she to dig deeper, she would find that she had accidentally created a global variable <code>count</code> (see Chapter 2 for <em>how</em> that happened!), and it currently has the value <code>NaN</code>. Of course, once she identifies this peculiar outcome, she then has a whole other set of questions: &quot;How was it global, and why did it end up <code>NaN</code> instead of some proper count value?&quot; (see Chapter 2).</p>
+<p>Instead of stopping at this point and digging into why the <code>this</code> reference doesn't seem to be behaving as <em>expected</em>, and answering those tough but important questions, many developers simply avoid the issue altogether, and hack toward some other solution, such as creating another object to hold the <code>count</code> property:</p>
+<pre><code class="language-js">function foo(num) {
+    console.log( &quot;foo: &quot; + num );
+
+    // keep track of how many times `foo` is called
+    data.count++;
+}
+
+var data = {
+    count: 0
+};
+
+var i;
+
+for (i=0; i&lt;10; i++) {
+    if (i &gt; 5) {
+        foo( i );
+    }
+}
+// foo: 6
+// foo: 7
+// foo: 8
+// foo: 9
+
+// how many times was `foo` called?
+console.log( data.count ); // 4
+</code></pre>
+<p>While it is true that this approach &quot;solves&quot; the problem, unfortunately it simply ignores the real problem -- lack of understanding what <code>this</code> means and how it works -- and instead falls back to the comfort zone of a more familiar mechanism: lexical scope.</p>
+<p><strong>Note:</strong> Lexical scope is a perfectly fine and useful mechanism; I am not belittling the use of it, by any means (see <em>&quot;Scope &amp; Closures&quot;</em> title of this book series). But constantly <em>guessing</em> at how to use <code>this</code>, and usually being <em>wrong</em>, is not a good reason to retreat back to lexical scope and never learn <em>why</em> <code>this</code> eludes you.</p>
+<p>To reference a function object from inside itself, <code>this</code> by itself will typically be insufficient. You generally need a reference to the function object via a lexical identifier (variable) that points at it.</p>
+<p>Consider these two functions:</p>
+<pre><code class="language-js">function foo() {
+    foo.count = 4; // `foo` refers to itself
+}
+
+setTimeout( function(){
+    // anonymous function (no name), cannot
+    // refer to itself
+}, 10 );
+</code></pre>
+<p>In the first function, called a &quot;named function&quot;, <code>foo</code> is a reference that can be used to refer to the function from inside itself.</p>
+<p>But in the second example, the function callback passed to <code>setTimeout(..)</code> has no name identifier (so called an &quot;anonymous function&quot;), so there's no proper way to refer to the function object itself.</p>
+<p><strong>Note:</strong> The old-school but now deprecated and frowned-upon <code>arguments.callee</code> reference inside a function <em>also</em> points to the function object of the currently executing function. This reference is typically the only way to access an anonymous function's object from inside itself. The best approach, however, is to avoid the use of anonymous functions altogether, at least for those which require a self-reference, and instead use a named function (expression). <code>arguments.callee</code> is deprecated and should not be used.</p>
+<p>So another solution to our running example would have been to use the <code>foo</code> identifier as a function object reference in each place, and not use <code>this</code> at all, which <em>works</em>:</p>
+<pre><code class="language-js">function foo(num) {
+    console.log( &quot;foo: &quot; + num );
+
+    // keep track of how many times `foo` is called
+    foo.count++;
+}
+
+foo.count = 0;
+
+var i;
+
+for (i=0; i&lt;10; i++) {
+    if (i &gt; 5) {
+        foo( i );
+    }
+}
+// foo: 6
+// foo: 7
+// foo: 8
+// foo: 9
+
+// how many times was `foo` called?
+console.log( foo.count ); // 4
+</code></pre>
+<p>However, that approach similarly side-steps <em>actual</em> understanding of <code>this</code> and relies entirely on the lexical scoping of variable <code>foo</code>.</p>
+<p>Yet another way of approaching the issue is to force <code>this</code> to actually point at the <code>foo</code> function object:</p>
+<pre><code class="language-js">function foo(num) {
+    console.log( &quot;foo: &quot; + num );
+
+    // keep track of how many times `foo` is called
+    // Note: `this` IS actually `foo` now, based on
+    // how `foo` is called (see below)
+    this.count++;
+}
+
+foo.count = 0;
+
+var i;
+
+for (i=0; i&lt;10; i++) {
+    if (i &gt; 5) {
+        // using `call(..)`, we ensure the `this`
+        // points at the function object (`foo`) itself
+        foo.call( foo, i );
+    }
+}
+// foo: 6
+// foo: 7
+// foo: 8
+// foo: 9
+
+// how many times was `foo` called?
+console.log( foo.count ); // 4
+</code></pre>
+<p><strong>Instead of avoiding <code>this</code>, we embrace it.</strong> We'll explain in a little bit <em>how</em> such techniques work much more completely, so don't worry if you're still a bit confused!</p>
+<h3>Its Scope</h3>
+<p>The next most common misconception about the meaning of <code>this</code> is that it somehow refers to the function's scope. It's a tricky question, because in one sense there is some truth, but in the other sense, it's quite misguided.</p>
+<p>To be clear, <code>this</code> does not, in any way, refer to a function's <strong>lexical scope</strong>. It is true that internally, scope is kind of like an object with properties for each of the available identifiers. But the scope &quot;object&quot; is not accessible to JavaScript code. It's an inner part of the <em>Engine</em>'s implementation.</p>
+<p>Consider code which attempts (and fails!) to cross over the boundary and use <code>this</code> to implicitly refer to a function's lexical scope:</p>
+<pre><code class="language-js">function foo() {
+    var a = 2;
+    this.bar();
+}
+
+function bar() {
+    console.log( this.a );
+}
+
+foo(); //undefined
+</code></pre>
+<p>There's more than one mistake in this snippet. While it may seem contrived, the code you see is a distillation of actual real-world code that has been exchanged in public community help forums. It's a wonderful (if not sad) illustration of just how misguided <code>this</code> assumptions can be.</p>
+<p>Firstly, an attempt is made to reference the <code>bar()</code> function via <code>this.bar()</code>. It is almost certainly an <em>accident</em> that it works, but we'll explain the <em>how</em> of that shortly. The most natural way to have invoked <code>bar()</code> would have been to omit the leading <code>this.</code> and just make a lexical reference to the identifier.</p>
+<p>However, the developer who writes such code is attempting to use <code>this</code> to create a bridge between the lexical scopes of <code>foo()</code> and <code>bar()</code>, so that <code>bar()</code> has access to the variable <code>a</code> in the inner scope of <code>foo()</code>. <strong>No such bridge is possible.</strong> You cannot use a <code>this</code> reference to look something up in a lexical scope. It is not possible.</p>
+<p>Every time you feel yourself trying to mix lexical scope look-ups with <code>this</code>, remind yourself: <em>there is no bridge</em>.</p>
+<h2>What's <code>this</code>?</h2>
+<p>Having set aside various incorrect assumptions, let us now turn our attention to how the <code>this</code> mechanism really works.</p>
+<p>We said earlier that <code>this</code> is not an author-time binding but a runtime binding. It is contextual based on the conditions of the function's invocation. <code>this</code> binding has nothing to do with where a function is declared, but has instead everything to do with the manner in which the function is called.</p>
+<p>When a function is invoked, an activation record, otherwise known as an execution context, is created. This record contains information about where the function was called from (the call-stack), <em>how</em> the function was invoked, what parameters were passed, etc. One of the properties of this record is the <code>this</code> reference which will be used for the duration of that function's execution.</p>
+<p>In the next chapter, we will learn to find a function's <strong>call-site</strong> to determine how its execution will bind <code>this</code>.</p>
+<h2>Review (TL;DR)</h2>
+<p><code>this</code> binding is a constant source of confusion for the JavaScript developer who does not take the time to learn how the mechanism actually works. Guesses, trial-and-error, and blind copy-n-paste from Stack Overflow answers is not an effective or proper way to leverage <em>this</em> important <code>this</code> mechanism.</p>
+<p>To learn <code>this</code>, you first have to learn what <code>this</code> is <em>not</em>, despite any assumptions or misconceptions that may lead you down those paths. <code>this</code> is neither a reference to the function itself, nor is it a reference to the function's <em>lexical</em> scope.</p>
+<p><code>this</code> is actually a binding that is made when a function is invoked, and <em>what</em> it references is determined entirely by the call-site where the function is called.</p>
+</section>
+   </body>
+ </html>

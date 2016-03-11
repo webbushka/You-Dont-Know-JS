@@ -1,0 +1,171 @@
+<!doctype html>
+ <html>
+   <head>
+     <link rel="stylesheet" href="../style.css">
+     <title>Types &amp; Grammar</title>
+     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/styles/github.min.css">
+     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.2.0/highlight.min.js"></script>
+     <script>document.addEventListener("DOMContentLoaded", () => hljs.initHighlightingOnLoad());</script>
+   </head>
+   <body>
+     <section id="main"><h1>You Don't Know JS: Types &amp; Grammar</h1>
+<h1>Chapter 4: Coercion</h1>
+<p>Now that we much more fully understand JavaScript's types and values, we turn our attention to a very controversial topic: coercion.</p>
+<p>As we mentioned in Chapter 1, the debates over whether coercion is a useful feature or a flaw in the design of the language (or somewhere in between!) have raged since day one. If you've read other popular books on JS, you know that the overwhelmingly prevalent <em>message</em> out there is that coercion is magical, evil, confusing, and just downright a bad idea.</p>
+<p>In the same overall spirit of this book series, rather than running away from coercion because everyone else does, or because you get bitten by some quirk, I think you should run toward that which you don't understand and seek to <em>get it</em> more fully.</p>
+<p>Our goal is to fully explore the pros and cons (yes, there <em>are</em> pros!) of coercion, so that you can make an informed decision on its appropriateness in your program.</p>
+<h2>Converting Values</h2>
+<p>Converting a value from one type to another is often called &quot;type casting,&quot; when done explicitly, and &quot;coercion&quot; when done implicitly (forced by the rules of how a value is used).</p>
+<p><strong>Note:</strong> It may not be obvious, but JavaScript coercions always result in one of the scalar primitive (see Chapter 2) values, like <code>string</code>, <code>number</code>, or <code>boolean</code>. There is no coercion that results in a complex value like <code>object</code> or <code>function</code>. Chapter 3 covers &quot;boxing,&quot; which wraps scalar primitive values in their <code>object</code> counterparts, but this is not really coercion in an accurate sense.</p>
+<p>Another way these terms are often distinguished is as follows: &quot;type casting&quot; (or &quot;type conversion&quot;) occur in statically typed languages at compile time, while &quot;type coercion&quot; is a runtime conversion for dynamically typed languages.</p>
+<p>However, in JavaScript, most people refer to all these types of conversions as <em>coercion</em>, so the way I prefer to distinguish is to say &quot;implicit coercion&quot; vs. &quot;explicit coercion.&quot;</p>
+<p>The difference should be obvious: &quot;explicit coercion&quot; is when it is obvious from looking at the code that a type conversion is intentionally occurring, whereas &quot;implicit coercion&quot; is when the type conversion will occur as a less obvious side effect of some other intentional operation.</p>
+<p>For example, consider these two approaches to coercion:</p>
+<pre><code class="language-js">var a = 42;
+
+var b = a + &quot;&quot;;         // implicit coercion
+
+var c = String( a );    // explicit coercion
+</code></pre>
+<p>For <code>b</code>, the coercion that occurs happens implicitly, because the <code>+</code> operator combined with one of the operands being a <code>string</code> value (<code>&quot;&quot;</code>) will insist on the operation being a <code>string</code> concatenation (adding two strings together), which <em>as a (hidden) side effect</em> will force the <code>42</code> value in <code>a</code> to be coerced to its <code>string</code> equivalent: <code>&quot;42&quot;</code>.</p>
+<p>By contrast, the <code>String(..)</code> function makes it pretty obvious that it's explicitly taking the value in <code>a</code> and coercing it to a <code>string</code> representation.</p>
+<p>Both approaches accomplish the same effect: <code>&quot;42&quot;</code> comes from <code>42</code>. But it's the <em>how</em> that is at the heart of the heated debates over JavaScript coercion.</p>
+<p><strong>Note:</strong> Technically, there's some nuanced behavioral difference here beyond the stylistic difference. We cover that in more detail later in the chapter, in the &quot;Implicitly: Strings &lt;--&gt; Numbers&quot; section.</p>
+<p>The terms &quot;explicit&quot; and &quot;implicit,&quot; or &quot;obvious&quot; and &quot;hidden side effect,&quot; are <em>relative</em>.</p>
+<p>If you know exactly what <code>a + &quot;&quot;</code> is doing and you're intentionally doing that to coerce to a <code>string</code>, you might feel the operation is sufficiently &quot;explicit.&quot; Conversely, if you've never seen the <code>String(..)</code> function used for <code>string</code> coercion, its behavior might seem hidden enough as to feel &quot;implicit&quot; to you.</p>
+<p>But we're having this discussion of &quot;explicit&quot; vs. &quot;implicit&quot; based on the likely opinions of an <em>average, reasonably informed, but not expert or JS specification devotee</em> developer. To whatever extent you do or do not find yourself fitting neatly in that bucket, you will need to adjust your perspective on our observations here accordingly.</p>
+<p>Just remember: it's often rare that we write our code and are the only ones who ever read it. Even if you're an expert on all the ins and outs of JS, consider how a less experienced teammate of yours will feel when they read your code. Will it be &quot;explicit&quot; or &quot;implicit&quot; to them in the same way it is for you?</p>
+<h2>Abstract Value Operations</h2>
+<p>Before we can explore <em>explicit</em> vs <em>implicit</em> coercion, we need to learn the basic rules that govern how values <em>become</em> either a <code>string</code>, <code>number</code>, or <code>boolean</code>. The ES5 spec in section 9 defines several &quot;abstract operations&quot; (fancy spec-speak for &quot;internal-only operation&quot;) with the rules of value conversion. We will specifically pay attention to: <code>ToString</code>, <code>ToNumber</code>, and <code>ToBoolean</code>, and to a lesser extent, <code>ToPrimitive</code>.</p>
+<h3><code>ToString</code></h3>
+<p>When any non-<code>string</code> value is coerced to a <code>string</code> representation, the conversion is handled by the <code>ToString</code> abstract operation in section 9.8 of the specification.</p>
+<p>Built-in primitive values have natural stringification: <code>null</code> becomes <code>&quot;null&quot;</code>, <code>undefined</code> becomes <code>&quot;undefined&quot;</code> and <code>true</code> becomes <code>&quot;true&quot;</code>. <code>number</code>s are generally expressed in the natural way you'd expect, but as we discussed in Chapter 2, very small or very large <code>numbers</code> are represented in exponent form:</p>
+<pre><code class="language-js">// multiplying `1.07` by `1000`, seven times over
+var a = 1.07 * 1000 * 1000 * 1000 * 1000 * 1000 * 1000 * 1000;
+
+// seven times three digits =&gt; 21 digits
+a.toString(); // &quot;1.07e21&quot;
+</code></pre>
+<p>For regular objects, unless you specify your own, the default <code>toString()</code> (located in <code>Object.prototype.toString()</code>) will return the <em>internal <code>[[Class]]</code></em> (see Chapter 3), like for instance <code>&quot;[object Object]&quot;</code>.</p>
+<p>But as shown earlier, if an object has its own <code>toString()</code> method on it, and you use that object in a <code>string</code>-like way, its <code>toString()</code> will automatically be called, and the <code>string</code> result of that call will be used instead.</p>
+<p><strong>Note:</strong> The way an object is coerced to a <code>string</code> technically goes through the <code>ToPrimitive</code> abstract operation (ES5 spec, section 9.1), but those nuanced details are covered in more detail in the <code>ToNumber</code> section later in this chapter, so we will skip over them here.</p>
+<p>Arrays have an overridden default <code>toString()</code> that stringifies as the (string) concatenation of all its values (each stringified themselves), with <code>&quot;,&quot;</code> in between each value:</p>
+<pre><code class="language-js">var a = [1,2,3];
+
+a.toString(); // &quot;1,2,3&quot;
+</code></pre>
+<p>Again, <code>toString()</code> can either be called explicitly, or it will automatically be called if a non-<code>string</code> is used in a <code>string</code> context.</p>
+<h4>JSON Stringification</h4>
+<p>Another task that seems awfully related to <code>ToString</code> is when you use the <code>JSON.stringify(..)</code> utility to serialize a value to a JSON-compatible <code>string</code> value.</p>
+<p>It's important to note that this stringification is not exactly the same thing as coercion. But since it's related to the <code>ToString</code> rules above, we'll take a slight diversion to cover JSON stringification behaviors here.</p>
+<p>For most simple values, JSON stringification behaves basically the same as <code>toString()</code> conversions, except that the serialization result is <em>always a <code>string</code></em>:</p>
+<pre><code class="language-js">JSON.stringify( 42 );   // &quot;42&quot;
+JSON.stringify( &quot;42&quot; ); // &quot;&quot;42&quot;&quot; (a string with a quoted string value in it)
+JSON.stringify( null ); // &quot;null&quot;
+JSON.stringify( true ); // &quot;true&quot;
+</code></pre>
+<p>Any <em>JSON-safe</em> value can be stringified by <code>JSON.stringify(..)</code>. But what is <em>JSON-safe</em>? Any value that can be represented validly in a JSON representation.</p>
+<p>It may be easier to consider values that are <strong>not</strong> JSON-safe. Some examples: <code>undefined</code>s, <code>function</code>s, (ES6+) <code>symbol</code>s, and <code>object</code>s with circular references (where property references in an object structure create a never-ending cycle through each other). These are all illegal values for a standard JSON structure, mostly because they aren't portable to other languages that consume JSON values.</p>
+<p>The <code>JSON.stringify(..)</code> utility will automatically omit <code>undefined</code>, <code>function</code>, and <code>symbol</code> values when it comes across them. If such a value is found in an <code>array</code>, that value is replaced by <code>null</code> (so that the array position information isn't altered). If found as a property of an <code>object</code>, that property will simply be excluded.</p>
+<p>Consider:</p>
+<pre><code class="language-js">JSON.stringify( undefined );                    // undefined
+JSON.stringify( function(){} );                 // undefined
+
+JSON.stringify( [1,undefined,function(){},4] ); // &quot;[1,null,null,4]&quot;
+JSON.stringify( { a:2, b:function(){} } );      // &quot;{&quot;a&quot;:2}&quot;
+</code></pre>
+<p>But if you try to <code>JSON.stringify(..)</code> an <code>object</code> with circular reference(s) in it, an error will be thrown.</p>
+<p>JSON stringification has the special behavior that if an <code>object</code> value has a <code>toJSON()</code> method defined, this method will be called first to get a value to use for serialization.</p>
+<p>If you intend to JSON stringify an object that may contain illegal JSON value(s), or if you just have values in the <code>object</code> that aren't appropriate for the serialization, you should define a <code>toJSON()</code> method for it that returns a <em>JSON-safe</em> version of the <code>object</code>.</p>
+<p>For example:</p>
+<pre><code class="language-js">var o = { };
+
+var a = {
+    b: 42,
+    c: o,
+    d: function(){}
+};
+
+// create a circular reference inside `a`
+o.e = a;
+
+// would throw an error on the circular reference
+// JSON.stringify( a );
+
+// define a custom JSON value serialization
+a.toJSON = function() {
+    // only include the `b` property for serialization
+    return { b: this.b };
+};
+
+JSON.stringify( a ); // &quot;{&quot;b&quot;:42}&quot;
+</code></pre>
+<p>It's a very common misconception that <code>toJSON()</code> should return a JSON stringification representation. That's probably incorrect, unless you're wanting to actually stringify the <code>string</code> itself (usually not!). <code>toJSON()</code> should return the actual regular value (of whatever type) that's appropriate, and <code>JSON.stringify(..)</code> itself will handle the stringification.</p>
+<p>In other words, <code>toJSON()</code> should be interpreted as &quot;to a JSON-safe value suitable for stringification,&quot; not &quot;to a JSON string&quot; as many developers mistakenly assume.</p>
+<p>Consider:</p>
+<pre><code class="language-js">var a = {
+    val: [1,2,3],
+
+    // probably correct!
+    toJSON: function(){
+        return this.val.slice( 1 );
+    }
+};
+
+var b = {
+    val: [1,2,3],
+
+    // probably incorrect!
+    toJSON: function(){
+        return &quot;[&quot; +
+            this.val.slice( 1 ).join() +
+        &quot;]&quot;;
+    }
+};
+
+JSON.stringify( a ); // &quot;[2,3]&quot;
+
+JSON.stringify( b ); // &quot;&quot;[2,3]&quot;&quot;
+</code></pre>
+<p>In the second call, we stringified the returned <code>string</code> rather than the <code>array</code> itself, which was probably not what we wanted to do.</p>
+<p>While we're talking about <code>JSON.stringify(..)</code>, let's discuss some lesser-known functionalities that can still be very useful.</p>
+<p>An optional second argument can be passed to <code>JSON.stringify(..)</code> that is called <em>replacer</em>. This argument can either be an <code>array</code> or a <code>function</code>. It's used to customize the recursive serialization of an <code>object</code> by providing a filtering mechanism for which properties should and should not be included, in a similar way to how <code>toJSON()</code> can prepare a value for serialization.</p>
+<p>If <em>replacer</em> is an <code>array</code>, it should be an <code>array</code> of <code>string</code>s, each of which will specify a property name that is allowed to be included in the serialization of the <code>object</code>. If a property exists that isn't in this list, it will be skipped.</p>
+<p>If <em>replacer</em> is a <code>function</code>, it will be called once for the <code>object</code> itself, and then once for each property in the <code>object</code>, and each time is passed two arguments, <em>key</em> and <em>value</em>. To skip a <em>key</em> in the serialization, return <code>undefined</code>. Otherwise, return the <em>value</em> provided.</p>
+<pre><code class="language-js">var a = {
+    b: 42,
+    c: &quot;42&quot;,
+    d: [1,2,3]
+};
+
+JSON.stringify( a, [&quot;b&quot;,&quot;c&quot;] ); // &quot;{&quot;b&quot;:42,&quot;c&quot;:&quot;42&quot;}&quot;
+
+JSON.stringify( a, function(k,v){
+    if (k !== &quot;c&quot;) return v;
+} );
+// &quot;{&quot;b&quot;:42,&quot;d&quot;:[1,2,3]}&quot;
+</code></pre>
+<p><strong>Note:</strong> In the <code>function</code> <em>replacer</em> case, the key argument <code>k</code> is <code>undefined</code> for the first call (where the <code>a</code> object itself is being passed in). The <code>if</code> statement <strong>filters out</strong> the property named <code>&quot;c&quot;</code>. Stringification is recursive, so the <code>[1,2,3]</code> array has each of its values (<code>1</code>, <code>2</code>, and <code>3</code>) passed as <code>v</code> to <em>replacer</em>, with indexes (<code>0</code>, <code>1</code>, and <code>2</code>) as <code>k</code>.</p>
+<p>A third optional argument can also be passed to <code>JSON.stringify(..)</code>, called <em>space</em>, which is used as indentation for prettier human-friendly output. <em>space</em> can be a positive integer to indicate how many space characters should be used at each indentation level. Or, <em>space</em> can be a <code>string</code>, in which case up to the first ten characters of its value will be used for each indentation level.</p>
+<pre><code class="language-js">var a = {
+    b: 42,
+    c: &quot;42&quot;,
+    d: [1,2,3]
+};
+
+JSON.stringify( a, null, 3 );
+// &quot;{
+//    &quot;b&quot;: 42,
+//    &quot;c&quot;: &quot;42&quot;,
+//    &quot;d&quot;: [
+//       1,
+//       2,
+//       3
+//    ]
+// }&quot;
+
+JSON.stringify( a, null, &quot;
+</code></pre>
+</section>
+   </body>
+ </html>
